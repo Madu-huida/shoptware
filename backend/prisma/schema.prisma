@@ -1,0 +1,272 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// 1. ESTOQUE DE PRODUTOS E PERFUMES (Abas: "Estoque " e "perfumes")
+// ============================================================================
+
+model Product {
+  id           Int      @id @default(autoincrement())
+  name         String   // PRODUTO (ex: "REDMI NOTE 17 4G 256GB 8GB RAM PRETO", "Perfume Feminino Lattafa Yara Edp 100 ML")
+  category     String   @default("CELULAR") // "CELULAR", "ACESSORIO", "PERFUME_FEMININO", "PERFUME_UNISSEX", "PERFUME_MASCULINO", "OUTROS"
+  
+  // Controle de Lotes e Quantidade (Aba "Estoque ")
+  lote1        Int      @default(0) // Coluna LOTE1
+  lote2        Int      @default(0) // Coluna LOTE 2
+  lote3        Int      @default(0) // Coluna LOTE3
+  quantity     Int      @default(0) // Quantidade total disponível (soma dos lotes ou estoque geral)
+  inAssistance Int      @default(0) // Seção ASSISTENCIA na aba "Estoque "
+
+  // Valores e Custos (Abas "Estoque " e "perfumes")
+  salePrice    Float    // VENDAS / VALOR VENDA (R$)
+  costPrice    Float    @default(0) // CUSTO / VALOR CUSTO R$
+  costDollar   Float?   // VALOR DOLLAR (US$ - específico para Perfumes / Importados)
+  dollarRate   Float?   // COTAÇAO do dólar usada no custo (ex: 5.50)
+
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relacionamentos
+  sales        Sale[]
+}
+
+model PhysicalStockCheck {
+  id            Int      @id @default(autoincrement())
+  date          DateTime @unique // DATA na tabela "TOTAL FISICO" da aba "Estoque "
+  totalPhysical Int      // TOTAL físico contado no dia
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+// ============================================================================
+// 2. CONTROLE DE VENDAS E ARQUIVO MORTO (Abas: "Vendas Dia" e "04-10" a "30-10")
+// ============================================================================
+
+model Sale {
+  id             Int      @id @default(autoincrement())
+  saleDate       DateTime @default(now()) // Data da venda (gera as abas DD-MM no Arquivo Morto)
+  neighborhood   String   // BAIRRO (ex: "JARIVA", "ITINGA", "LOCAL", "ARAQUARI")
+  quantity       Int      @default(1) // NUMERO (quantidade vendida)
+
+  // Vínculo com Produto do Estoque (para baixa automática e estorno ao cancelar)
+  productId      Int?
+  product        Product? @relation(fields: [productId], references: [id])
+  productName    String   // PRODUTO (mantém o histórico textual exato da planilha)
+
+  // Valores Financeiros da Venda
+  grossValue     Float    // VALOR BRUTO (valor cobrado do cliente)
+  netSaleValue   Float    // VENDAS (valor líquido recebido após taxa da maquininha)
+  stockValue     Float    // VALOR ESTOQUE (custo/tabela base do produto no estoque)
+  extraValue     Float    @default(0) // EXTRA (valores adicionais ou ajustes da linha)
+  deliveryFee    Float    @default(0) // MOTO (taxa de entrega do motoboy)
+  paymentMethod  String   // PAGAMENTO (ex: "PIX MASTER", "PAG SEGURO", "DINHEIRO", "NU BANK", "LINK NU", "PAG JERUSA")
+  cooperValue    Float    @default(0) // COOPER (repasse cooperativa / dinheiro motoboy)
+  ricocheteValue Float    @default(0) // RICOCHETE
+  difference     Float    // DIFERENÇA (fórmula da planilha: netSaleValue - stockValue - deliveryFee - extraValue)
+
+  // Controle de Cancelamento e Origem (Regra de Negócio: PC vs Celular)
+  status         String   @default("COMPLETED") // "COMPLETED" | "CANCELLED" (ao cancelar, retorna ao estoque)
+  originDevice   String   @default("MOBILE")    // "PC" | "MOBILE"
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relacionamento opcional com Termo de Garantia
+  warranty       WarrantyReceipt?
+}
+
+// ============================================================================
+// 3. DASHBOARD GERAL, ENTRADAS E VALORES REAIS (Abas: "TOTAL", "Entradas", "Valores Real")
+// ============================================================================
+
+model DailyEntry {
+  id               Int      @id @default(autoincrement())
+  date             DateTime @unique // DATA (Janeiro a Dezembro na aba "Entradas")
+  cellSales        Float    @default(0) // VENDAS / VENDAS CELULAR
+  extraValue       Float    @default(0) // Coluna extra
+  quantity         Int      @default(0) // QUANTIDADE de aparelhos vendidos no dia
+  cellNote         String?  // Coluna cell
+  huidaTransportes Float    @default(0) // HUIDA TRANSPORTES
+  rentals          Float    @default(0) // ALUGUEIS
+  otherIncomes     Float    @default(0) // ENTRADAS / RENDAS
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model FinancialAccount {
+  id          Int                   @id @default(autoincrement())
+  name        String                @unique // LOCAL na aba "Valores Real" (ex: "DINHEIRO", "NUBANK MASTER", "PAG SEGURO", "SHOPEE PAY", "MUTUAN", "PARAGUIA")
+  category    String                @default("BANK") // "CASH", "BANK", "GATEWAY", "PARTNER", "STOCK"
+  currentSwap Float                 @default(0)      // Coluna VALORES SWAP
+  active      Boolean               @default(true)
+  balances    DailyAccountBalance[]
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+}
+
+model DailyAccountBalance {
+  id         Int              @id @default(autoincrement())
+  date       DateTime         // Data da coluna (ex: 2026-10-01 a 2026-10-31)
+  accountId  Int
+  account    FinancialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  balance    Float            @default(0) // Saldo registrado no dia
+  difference Float            @default(0) // Linha de diferença/ajuste diário
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@unique([date, accountId])
+}
+
+// ============================================================================
+// 4. MÓDULO DE DESPESAS E CONTAS A PAGAR
+// (Abas: "Gastos", "Gastos CARTÃO", "GASTOS TRANSPORTES", "Gastos Compras", "Gastos BIG" e "CONTAS")
+// ============================================================================
+
+model Expense {
+  id          Int      @id @default(autoincrement())
+  date        DateTime // DATA do gasto
+  
+  // Módulo / Aba correspondente na planilha:
+  // "GERAL"      -> Aba "Gastos" (ALIMENTAÇÃO, MERCADO, SAUDE, FINANCIAMENTO, COMBUSTIVEL, VEICULOS, CONTAS CASA/APT, CONTADOR, MARCIO, JERUSA, MADU, SEGUROS, CARTAO CREDITO, EMPRESTIMOS, JUROS, IMPOSTO, OUTROS)
+  // "CARTAO"     -> Aba "Gastos CARTÃO" (ALIMENTAÇÃO, MERCADO, SAUDE, FINANCIAMENTO, COMBUSTIVEL, VEICULOS, CONTAS CASA/APT, ROUPAS, MARCIO, JERUSA, ACORDOS, SEGUROS, APP, ASSINATURAS, EMPRESTIMOS, JUROS/ANUIDADE, IMPOSTO, OUTROS)
+  // "TRANSPORTE" -> Aba "GASTOS TRANSPORTES" (FINANCIAMENTOS, DIESEL HR, DIESEL DUCATO, MANUTENÇÃO, SEGUROS, IMPOSTOS, OUTROS, CARTÃO)
+  // "COMPRAS"    -> Aba "Gastos Compras" (PRODUTOS)
+  // "BIG"        -> Aba "Gastos BIG" (SALARIOS, MATERIAL, PROPAGANDA, TAXA, ALUGUEL, CONSERTO, MOTOBOY, PERDAS, GANHOS)
+  module      String
+  
+  category    String   // Subcategoria / Coluna específica da aba
+  amount      Float    // Valor (R$)
+  description String?  // Observação adicional
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PayableBill {
+  id         Int      @id @default(autoincrement())
+  dueDate    DateTime // VENCIMENTO na aba "CONTAS"
+  name       String   // CONTAS (ex: "CARTAO ITAU UNICLAS FINAL 8804", "AGUAS JOINVILLE", "FINANC. HR 28-48")
+  amount     Float    // VALORES
+  
+  // Categoria de alocação na aba "CONTAS":
+  // "CARTAO_CREDITO", "HUIDA_TRANSPORTES", "VEICULOS", "MULTAS", "IMPOSTOS", "FIXAS", "SAUDE", "CONSTRUCAO", "EDUCACAO"
+  category   String
+  
+  paidAmount Float    @default(0) // Valor lançado na coluna da categoria quando pago
+  isPaid     Boolean  @default(false)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ============================================================================
+// 5. FORNECEDORES E GARANTIAS (Abas: "Paraguai Marcio", "Paraguai edi", "Paraguia 30-10" e "GARANTIA")
+// ============================================================================
+
+model SupplierOrder {
+  id              Int                 @id @default(autoincrement())
+  tabName         String              // Nome da aba/lote (ex: "Paraguai Marcio", "Paraguai edi", "Paraguia 30-10")
+  supplierName    String              @default("JAPA") // Fornecedor (ex: "JAPA")
+  orderDate       DateTime            @default(now())  // DATA
+  dollarRate      Float               @default(5.47)   // DOLLAR (Cotação do pedido)
+  surchargeFactor Float               @default(1.0)    // PORCENTAGEM (ex: 1.0 ou 1.15 para 15% de freteiro)
+  discount        Float               @default(0)      // DESCONTO
+  adjustments     Float               @default(0)      // AJUSTES
+  previousBalance Float               @default(0)      // SALDO ANTERIOR (ex: -29174)
+  totalOrderUsd   Float               @default(0)      // TOTAL PEDIDO (US$)
+  totalCostBrl    Float               @default(0)      // TOTAL CUSTO (R$)
+  totalSalesBrl   Float               @default(0)      // TOTAL VENDAS (R$)
+  totalProfitBrl  Float               @default(0)      // LUCRO TOTAL (R$)
+  notes           String?
+  items           SupplierOrderItem[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+}
+
+model SupplierOrderItem {
+  id                  Int           @id @default(autoincrement())
+  orderId             Int
+  order               SupplierOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  quantity            Int           @default(1) // QTD
+  productName         String        // PRODUTO (ex: "POCO C85 256GB 8GB RAM ROXO", "MUTHUAN PERFUMES")
+  storeCostUsd        Float         // CUSTO LOJA (US$)
+  totalStoreCostUsd   Float         // CUSTO TOTAL LOJA (US$)
+  totalCostWithPctUsd Float         // CUSTO TOTAL % (US$ com porcentagem do freteiro)
+  costBrl             Float         // CUSTO REAIS / CUSTO TOTAL (R$)
+  unitCostBrl         Float         // CUSTO UNITARIO (R$)
+  unitSalePriceBrl    Float         // Preço de venda unitário previsto (R$)
+  totalSalesBrl       Float         // TOTAL VENDAS (R$)
+  totalProfitBrl      Float         // LUCRO total do item (R$)
+  unitProfitBrl       Float         // Lucro unitário (R$)
+  marginPercent       Float         // % (Margem de lucro)
+}
+
+model WarrantyReceipt {
+  id            Int            @id @default(autoincrement())
+  saleId        Int?           @unique
+  sale          Sale?          @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  
+  // Dados da Empresa (Aba "GARANTIA" - BIG SHOP IMPORTADOS)
+  companyName   String         @default("BIGSHOP IMPORTADOS")
+  companyCnpj   String         @default("47891653/0001-71")
+  companyPhone1 String         @default("47 999982797")
+  companyPhone2 String         @default("47 999701454")
+  companyStreet String         @default("Rua SANTA CATARINA 3180")
+
+  // Dados do Cliente
+  customerCpf   String?        // CPF
+  customerName  String         // CLIENTE (ex: "José Fernando dos Santos Junior")
+  customerPhone String?        // TELEFONE
+  street        String?        // ENDEREÇO
+  streetNumber  String?        // NUMERO
+  neighborhood  String?        // BAIRRO
+  city          String         @default("JOINVILLE") // CIDADE
+  purchaseDate  DateTime       @default(now())       // DATA COMPRA
+
+  // Pagamento e Termo
+  paymentMethod String         @default("PIX") // FORMA PAGAMENTO
+  paymentDetail String?        @default("PIX MASTER-47891653000171")
+  totalAmount   Float          // VALOR TOTAL A PAGAR
+  warrantyText  String         @default("GARANTIA DE 90 DIAS CONTRA DEFEITO DE FABRICAÇÃO , NÃO COBRE CELULAR COM SINAIS DE QUEDA , MOLHADO OU COM MARCAS DE MAU USO, CELULARES QUE POR VENTURA VIEREM A TER DEFEITO SERAO ANALISADO PELO TECNICO ")
+
+  items         WarrantyItem[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model WarrantyItem {
+  id         Int             @id @default(autoincrement())
+  warrantyId Int
+  warranty   WarrantyReceipt @relation(fields: [warrantyId], references: [id], onDelete: Cascade)
+  quantity   Int             @default(1) // QTD
+  model      String          // MODELO (ex: "POCO C85 256GB 8GB RAM ROXO")
+  cashPrice  Float           // VALOR VISTA
+  cardFee    Float           @default(0) // TAXA CARTÃO
+  freight    Float           @default(0) // FRETE
+  totalPrice Float           // VALOR TOTAL
+}
+
+// ============================================================================
+// 6. TAXAS DE MAQUININHA (Aba: "TAXA")
+// ============================================================================
+
+model CardFeeRate {
+  id                  Int      @id @default(autoincrement())
+  type                String   @unique // TIPO: "DEBITO", "CREDITO", "2X", "3X" ... "18X"
+  installments        Int      @default(1) // Número de parcelas (1 a 18)
+  customerRate        Float    // % repassada ao cliente para simular VALOR FINAL (ex: 0.0141, 0.0331, 0.062...)
+  machineDiscountRate Float    // TAXA descontada pela maquininha no RECEBER (ex: 0.0141, 0.0331, 0.069...)
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
