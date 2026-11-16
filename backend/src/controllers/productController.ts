@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { prisma } from "../lib/prisma";
+import { emitRealtimeEvent } from "../lib/socket";
 
 export const productController = {
   // Listar produtos com filtros e resumo estilo abas "Estoque " e "perfumes"
@@ -142,6 +143,7 @@ export const productController = {
         }
       });
 
+      emitRealtimeEvent("stock:updated", { action: "created", product });
       res.status(201).json(product);
     } catch (error) {
       console.error("Erro ao criar produto:", error);
@@ -217,6 +219,7 @@ export const productController = {
         }
       });
 
+      emitRealtimeEvent("stock:updated", { action: "updated", product: updated });
       res.json(updated);
     } catch (error) {
       console.error("Erro ao atualizar produto:", error);
@@ -244,11 +247,13 @@ export const productController = {
           where: { id },
           data: { active: false, quantity: 0, lote1: 0, lote2: 0, lote3: 0 }
         });
+        emitRealtimeEvent("stock:updated", { action: "archived", productId: id });
         res.json({ message: "Produto possui histórico de vendas e foi arquivado/zerado.", product: archived });
         return;
       }
 
       await prisma.product.delete({ where: { id } });
+      emitRealtimeEvent("stock:updated", { action: "deleted", productId: id });
       res.json({ message: "Produto removido com sucesso." });
     } catch (error) {
       console.error("Erro ao remover produto:", error);

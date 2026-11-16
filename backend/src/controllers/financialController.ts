@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { emitRealtimeEvent } from "../lib/socket";
 
 export const financialController = {
   // Dashboard Geral (Replica a aba "TOTAL" consolidando Entradas, Estoque e Gastos do mês/período)
@@ -251,6 +252,7 @@ export const financialController = {
         }
       });
 
+      emitRealtimeEvent("financial:updated", { action: "entry_upserted", entry });
       res.json(entry);
     } catch (error) {
       console.error("Erro ao salvar entrada diária:", error);
@@ -310,6 +312,7 @@ export const financialController = {
         }
       });
 
+      emitRealtimeEvent("financial:updated", { action: "account_created", account });
       res.status(201).json(account);
     } catch (error) {
       console.error("Erro ao criar conta financeira:", error);
@@ -355,6 +358,7 @@ export const financialController = {
         });
       }
 
+      emitRealtimeEvent("financial:updated", { action: "balance_upserted", record });
       res.json(record);
     } catch (error) {
       console.error("Erro ao salvar saldo diário:", error);
@@ -406,6 +410,7 @@ export const financialController = {
         }
       });
 
+      emitRealtimeEvent("financial:updated", { action: "card_fee_upserted", rate });
       res.json(rate);
     } catch (error) {
       console.error("Erro ao salvar taxa:", error);

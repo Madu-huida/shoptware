@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { emitRealtimeEvent } from "../lib/socket";
 
 export const EXPENSE_CATEGORIES_BY_MODULE: Record<string, string[]> = {
   GERAL: [
@@ -147,6 +148,8 @@ export const expenseController = {
         }
       });
 
+      emitRealtimeEvent("expense:updated", { action: "created", expense });
+      emitRealtimeEvent("financial:updated", { module: expense.module });
       res.status(201).json(expense);
     } catch (error) {
       console.error("Erro ao criar despesa:", error);
@@ -178,6 +181,8 @@ export const expenseController = {
         }
       });
 
+      emitRealtimeEvent("expense:updated", { action: "updated", expense: updated });
+      emitRealtimeEvent("financial:updated", { module: updated.module });
       res.json(updated);
     } catch (error) {
       console.error("Erro ao atualizar despesa:", error);
@@ -190,6 +195,8 @@ export const expenseController = {
     try {
       const id = Number(req.params.id);
       await prisma.expense.delete({ where: { id } });
+      emitRealtimeEvent("expense:updated", { action: "deleted", expenseId: id });
+      emitRealtimeEvent("financial:updated", { expenseId: id });
       res.json({ message: "Despesa excluída com sucesso." });
     } catch (error) {
       console.error("Erro ao excluir despesa:", error);
@@ -276,6 +283,8 @@ export const expenseController = {
         }
       });
 
+      emitRealtimeEvent("expense:updated", { action: "bill_created", bill });
+      emitRealtimeEvent("financial:updated", { billId: bill.id });
       res.status(201).json(bill);
     } catch (error) {
       console.error("Erro ao criar conta:", error);
@@ -315,6 +324,8 @@ export const expenseController = {
         }
       });
 
+      emitRealtimeEvent("expense:updated", { action: "bill_updated", bill: updated });
+      emitRealtimeEvent("financial:updated", { billId: updated.id });
       res.json(updated);
     } catch (error) {
       console.error("Erro ao atualizar conta:", error);
@@ -326,6 +337,8 @@ export const expenseController = {
     try {
       const id = Number(req.params.id);
       await prisma.payableBill.delete({ where: { id } });
+      emitRealtimeEvent("expense:updated", { action: "bill_deleted", billId: id });
+      emitRealtimeEvent("financial:updated", { billId: id });
       res.json({ message: "Conta removida com sucesso." });
     } catch (error) {
       console.error("Erro ao remover conta:", error);

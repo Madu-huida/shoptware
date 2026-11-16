@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { emitRealtimeEvent } from "../lib/socket";
 
 function calculateDifference(
   netSaleValue: number,
@@ -258,6 +259,10 @@ export const saleController = {
         return sale;
       });
 
+      emitRealtimeEvent("sale:created", createdSale);
+      emitRealtimeEvent("stock:updated", { productId: createdSale.productId });
+      emitRealtimeEvent("financial:updated", { date: createdSale.saleDate });
+
       res.status(201).json(createdSale);
     } catch (error) {
       console.error("Erro ao registrar venda:", error);
@@ -346,6 +351,10 @@ export const saleController = {
         return sale;
       });
 
+      emitRealtimeEvent("sale:updated", updatedSale);
+      emitRealtimeEvent("stock:updated", { productId: updatedSale.productId });
+      emitRealtimeEvent("financial:updated", { date: updatedSale.saleDate });
+
       res.json(updatedSale);
     } catch (error) {
       console.error("Erro ao atualizar venda:", error);
@@ -383,6 +392,10 @@ export const saleController = {
         return sale;
       });
 
+      emitRealtimeEvent("sale:cancelled", cancelledSale);
+      emitRealtimeEvent("stock:updated", { productId: cancelledSale.productId });
+      emitRealtimeEvent("financial:updated", { date: cancelledSale.saleDate });
+
       res.json({
         message: "Venda cancelada com sucesso. O produto retornou ao estoque automaticamente.",
         sale: cancelledSale
@@ -415,6 +428,10 @@ export const saleController = {
 
         return existing;
       });
+
+      emitRealtimeEvent("sale:deleted", { id: deletedInfo.id, productId: deletedInfo.productId });
+      emitRealtimeEvent("stock:updated", { productId: deletedInfo.productId });
+      emitRealtimeEvent("financial:updated", { date: deletedInfo.saleDate });
 
       res.json({
         message: "Venda excluída com sucesso e estoque restaurado automaticamente.",

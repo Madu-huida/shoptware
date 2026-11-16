@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { prisma } from "../lib/prisma";
+import { emitRealtimeEvent } from "../lib/socket";
 
 interface RawSupplierItemInput {
   quantity: number;
@@ -131,6 +132,7 @@ export const supplierWarrantyController = {
         include: { items: true }
       });
 
+      emitRealtimeEvent("supplier:updated", { action: "created", order });
       res.status(201).json(order);
     } catch (error) {
       console.error("Erro ao criar pedido de fornecedor:", error);
@@ -212,6 +214,7 @@ export const supplierWarrantyController = {
         });
       });
 
+      emitRealtimeEvent("supplier:updated", { action: "updated", order: updated });
       res.json(updated);
     } catch (error) {
       console.error("Erro ao atualizar pedido de fornecedor:", error);
@@ -223,6 +226,7 @@ export const supplierWarrantyController = {
     try {
       const id = Number(req.params.id);
       await prisma.supplierOrder.delete({ where: { id } });
+      emitRealtimeEvent("supplier:updated", { action: "deleted", orderId: id });
       res.json({ message: "Pedido de fornecedor removido com sucesso." });
     } catch (error) {
       console.error("Erro ao remover pedido de fornecedor:", error);
@@ -335,6 +339,7 @@ export const supplierWarrantyController = {
         include: { items: true }
       });
 
+      emitRealtimeEvent("warranty:updated", { action: "created", receipt });
       res.status(201).json(receipt);
     } catch (error) {
       console.error("Erro ao emitir garantia:", error);
@@ -346,6 +351,7 @@ export const supplierWarrantyController = {
     try {
       const id = Number(req.params.id);
       await prisma.warrantyReceipt.delete({ where: { id } });
+      emitRealtimeEvent("warranty:updated", { action: "deleted", warrantyId: id });
       res.json({ message: "Termo de garantia excluído com sucesso." });
     } catch (error) {
       console.error("Erro ao excluir garantia:", error);
