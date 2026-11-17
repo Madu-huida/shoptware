@@ -43,3 +43,43 @@ textarea:user-valid {
     border-color: var(--brand-color, #059669);
   }
 }
+
+/* Responsive Data Table (modern-web-guidance: responsive-table) */
+.table-wrapper {
+  overflow: auto;
+  max-inline-size: 100%;
+  max-block-size: min(640px, 78vh);
+  container-type: inline-size;
+}
+
+.table-wrapper table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+
+.table-wrapper thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+}
+
+.table-wrapper tbody th {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background-color: #ffffff;
+}
+
+/* Accessible Tablist Indicator (modern-web-guidance: tabs) */
+[role="tab"] {
+  position: relative;
+  flex: none;
+}
+
+[role="tab"][aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  border-block-end: 3px solid var(--brand-color);
+}
