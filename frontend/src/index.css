@@ -4,7 +4,14 @@
   --brand-color: #059669;
   --brand-color-dark: #047857;
   --brand-surface: #ecfdf5;
+  --target-size: 24px;
   color-scheme: light;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --target-size: 44px;
+  }
 }
 
 body {
@@ -12,6 +19,25 @@ body {
   scrollbar-color: #059669 #e2e8f0;
   background-color: #f8fafc;
   color: #0f172a;
+  overflow-wrap: break-word;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+:where(
+    button,
+    select,
+    textarea,
+    input:not([type="checkbox"], [type="radio"]),
+    [role="button"],
+    nav a
+  ) {
+  min-block-size: var(--target-size);
+  min-inline-size: var(--target-size);
 }
 
 ::selection {

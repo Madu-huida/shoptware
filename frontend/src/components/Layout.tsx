@@ -15,13 +15,18 @@ import {
 } from "lucide-react";
 import { useRealtime } from "../context/RealtimeContext";
 
-const NAV_ITEMS = [
+const PC_NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/vendas", label: "Vendas", icon: ShoppingCart },
   { to: "/estoque", label: "Estoque", icon: Package },
   { to: "/financeiro", label: "Financeiro", icon: Wallet },
   { to: "/despesas", label: "Despesas", icon: Receipt },
   { to: "/pdv", label: "PDV Celular", icon: Smartphone }
+];
+
+const MOBILE_NAV_ITEMS = [
+  { to: "/pdv", label: "PDV (Registrar Venda)", icon: Smartphone, end: false },
+  { to: "/estoque", label: "Consultar Estoque", icon: Package, end: false }
 ];
 
 export const Layout: React.FC = () => {
@@ -127,23 +132,25 @@ export const Layout: React.FC = () => {
         {/* Barra de Navegação das Rotas Principais */}
         <nav className="bg-emerald-950/80 border-t border-emerald-800/80 overflow-x-auto">
           <div className="max-w-7xl mx-auto px-4 flex items-center gap-1 py-1.5">
-            {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={end}
-                className={({ isActive }) =>
-                  `flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition ${
-                    isActive
-                      ? "bg-emerald-600 text-white shadow-sm"
-                      : "text-emerald-100/80 hover:bg-emerald-800/60 hover:text-white"
-                  }`
-                }
-              >
-                <Icon className="w-4 h-4 shrink-0" />
-                <span>{label}</span>
-              </NavLink>
-            ))}
+            {(deviceMode === "MOBILE" ? MOBILE_NAV_ITEMS : PC_NAV_ITEMS).map(
+              ({ to, label, icon: Icon, end }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={end}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition ${
+                      isActive
+                        ? "bg-emerald-600 text-white shadow-sm"
+                        : "text-emerald-100/80 hover:bg-emerald-800/60 hover:text-white"
+                    }`
+                  }
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span>{label}</span>
+                </NavLink>
+              )
+            )}
           </div>
         </nav>
       </header>
