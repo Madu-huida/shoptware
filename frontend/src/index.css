@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+:root {
+  --brand-color: #059669;
+  --brand-color-dark: #047857;
+  --brand-surface: #ecfdf5;
+  color-scheme: light;
+}
+
+body {
+  accent-color: var(--brand-color);
+  scrollbar-color: #059669 #e2e8f0;
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+::selection {
+  background-color: #a7f3d0;
+  color: #064e3b;
+}
+
+textarea {
+  resize: vertical;
+}
+
+input:not(input[type="range"]):user-invalid,
+select:user-invalid,
+textarea:user-invalid {
+  border-color: #dc2626;
+  outline-color: #dc2626;
+}
+
+input:not(input[type="range"]):user-valid,
+select:user-valid,
+textarea:user-valid {
+  border-color: #059669;
+}
+
+@supports not (accent-color: var(--brand-color)) {
+  input[type="checkbox"]:checked,
+  input[type="radio"]:checked {
+    background-color: var(--brand-color, #059669);
+    border-color: var(--brand-color, #059669);
+  }
+}
