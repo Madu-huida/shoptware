@@ -10,9 +10,10 @@ import {
   Truck,
   Receipt,
   RefreshCw,
-  ArrowUpRight
+  ArrowUpRight,
+  FileSpreadsheet
 } from "lucide-react";
-import { apiFetch, formatBRL, formatDateBR } from "../lib/api";
+import { apiFetch, formatBRL, formatDateBR, getExportSalesUrl } from "../lib/api";
 import { useRealtime } from "../context/RealtimeContext";
 
 interface DashboardResponse {
@@ -153,6 +154,15 @@ export const DashboardPage: React.FC = () => {
               </select>
             </>
           )}
+
+          <a
+            href={getExportSalesUrl(selectedMonth, selectedYear)}
+            download
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold transition"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>Exportar Arquivo Morto (.xlsx)</span>
+          </a>
 
           <button
             type="button"

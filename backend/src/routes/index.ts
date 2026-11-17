@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { productController } from "../controllers/productController";
 import { saleController } from "../controllers/saleController";
+import { exportController } from "../controllers/exportController";
 import { expenseController } from "../controllers/expenseController";
 import { financialController } from "../controllers/financialController";
 import { supplierWarrantyController } from "../controllers/supplierWarrantyController";
@@ -27,6 +28,7 @@ router.delete("/products/:id", requirePcForStockAdjustment, productController.re
 // ============================================================================
 // 2. CONTROLE DE VENDAS (PC e Celular - com baixa e estorno de estoque)
 // ============================================================================
+router.get("/sales/export", exportController.exportMonthlySalesXlsx);
 router.get("/sales", saleController.list);
 router.post("/sales", saleController.create);
 router.put("/sales/:id", saleController.update);

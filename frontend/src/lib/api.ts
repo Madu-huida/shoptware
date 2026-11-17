@@ -75,3 +75,7 @@ export function toISODateInput(dateInput?: Date | string): string {
   const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
+
+export function getExportSalesUrl(month: string | number, year: string | number): string {
+  return `${API_BASE}/sales/export?month=${month}&year=${year}`;
+}

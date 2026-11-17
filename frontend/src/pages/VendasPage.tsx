@@ -7,9 +7,10 @@ import {
   Calendar,
   Check,
   X,
-  Edit3
+  Edit3,
+  FileSpreadsheet
 } from "lucide-react";
-import { apiFetch, formatBRL, formatDateBR, toISODateInput } from "../lib/api";
+import { apiFetch, formatBRL, formatDateBR, getExportSalesUrl, toISODateInput } from "../lib/api";
 import { useRealtime } from "../context/RealtimeContext";
 import { ProductRecord } from "./EstoquePage";
 
@@ -368,6 +369,15 @@ export const VendasPage: React.FC = () => {
             <option value="COMPLETED">Vendas Ativas ({sales.length})</option>
             <option value="CANCELLED">Vendas Canceladas</option>
           </select>
+
+          <a
+            href={getExportSalesUrl(selectedMonth, selectedYear)}
+            download
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs sm:text-sm font-semibold shadow-sm transition"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Exportar Arquivo Morto (.xlsx)</span>
+          </a>
 
           <button
             type="button"
