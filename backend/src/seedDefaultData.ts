@@ -1,33 +1,48 @@
 import { prisma } from "./lib/prisma";
 
 export async function ensureInitialSeed(): Promise<void> {
-  // 1. Seed das Taxas de Maquininha (Aba "TAXA")
+  // 1. Seed das Taxas de Maquininha (Aba "TAXA" com fixedFee e extraInstallmentFee exatos da planilha)
+  const defaultRates = [
+    { type: "DEBITO", installments: 1, customerRate: 0.0141, fixedFee: 0, extraInstallmentFee: 0, machineDiscountRate: 0.0141 },
+    { type: "CREDITO", installments: 1, customerRate: 0.0331, fixedFee: 5, extraInstallmentFee: 3, machineDiscountRate: 0.0331 },
+    { type: "2X", installments: 2, customerRate: 0.062, fixedFee: 6, extraInstallmentFee: 6, machineDiscountRate: 0.062 },
+    { type: "3X", installments: 3, customerRate: 0.072, fixedFee: 9, extraInstallmentFee: 9, machineDiscountRate: 0.069 },
+    { type: "4X", installments: 4, customerRate: 0.085, fixedFee: 12, extraInstallmentFee: 12, machineDiscountRate: 0.0795 },
+    { type: "5X", installments: 5, customerRate: 0.098, fixedFee: 15, extraInstallmentFee: 15, machineDiscountRate: 0.089 },
+    { type: "6X", installments: 6, customerRate: 0.11, fixedFee: 18, extraInstallmentFee: 18, machineDiscountRate: 0.096 },
+    { type: "7X", installments: 7, customerRate: 0.128, fixedFee: 21, extraInstallmentFee: 21, machineDiscountRate: 0.11 },
+    { type: "8X", installments: 8, customerRate: 0.141, fixedFee: 24, extraInstallmentFee: 24, machineDiscountRate: 0.1185 },
+    { type: "9X", installments: 9, customerRate: 0.1535, fixedFee: 27, extraInstallmentFee: 27, machineDiscountRate: 0.1335 },
+    { type: "10X", installments: 10, customerRate: 0.167, fixedFee: 30, extraInstallmentFee: 30, machineDiscountRate: 0.135 },
+    { type: "11X", installments: 11, customerRate: 0.18, fixedFee: 33, extraInstallmentFee: 33, machineDiscountRate: 0.153 },
+    { type: "12X", installments: 12, customerRate: 0.193, fixedFee: 36, extraInstallmentFee: 36, machineDiscountRate: 0.156 },
+    { type: "13X", installments: 13, customerRate: 0.2045, fixedFee: 0, extraInstallmentFee: 0, machineDiscountRate: 0.169 },
+    { type: "14X", installments: 14, customerRate: 0.218, fixedFee: 0, extraInstallmentFee: 0, machineDiscountRate: 0.182 },
+    { type: "15X", installments: 15, customerRate: 0.232, fixedFee: 0, extraInstallmentFee: 0, machineDiscountRate: 0.198 },
+    { type: "16X", installments: 16, customerRate: 0.245, fixedFee: 0, extraInstallmentFee: 0, machineDiscountRate: 0.213 },
+    { type: "17X", installments: 17, customerRate: 0.26, fixedFee: 0, extraInstallmentFee: 0, machineDiscountRate: 0.233 },
+    { type: "18X", installments: 18, customerRate: 0.273, fixedFee: 0, extraInstallmentFee: 0, machineDiscountRate: 0.255 }
+  ];
+
   const existingFees = await prisma.cardFeeRate.count();
   if (existingFees === 0) {
-    const defaultRates = [
-      { type: "DEBITO", installments: 1, customerRate: 0.0141, machineDiscountRate: 0.0141 },
-      { type: "CREDITO", installments: 1, customerRate: 0.0331, machineDiscountRate: 0.0331 },
-      { type: "2X", installments: 2, customerRate: 0.062, machineDiscountRate: 0.062 },
-      { type: "3X", installments: 3, customerRate: 0.072, machineDiscountRate: 0.069 },
-      { type: "4X", installments: 4, customerRate: 0.085, machineDiscountRate: 0.0795 },
-      { type: "5X", installments: 5, customerRate: 0.098, machineDiscountRate: 0.089 },
-      { type: "6X", installments: 6, customerRate: 0.11, machineDiscountRate: 0.096 },
-      { type: "7X", installments: 7, customerRate: 0.128, machineDiscountRate: 0.11 },
-      { type: "8X", installments: 8, customerRate: 0.141, machineDiscountRate: 0.1185 },
-      { type: "9X", installments: 9, customerRate: 0.1535, machineDiscountRate: 0.1335 },
-      { type: "10X", installments: 10, customerRate: 0.167, machineDiscountRate: 0.135 },
-      { type: "11X", installments: 11, customerRate: 0.18, machineDiscountRate: 0.153 },
-      { type: "12X", installments: 12, customerRate: 0.193, machineDiscountRate: 0.156 },
-      { type: "13X", installments: 13, customerRate: 0.2045, machineDiscountRate: 0.169 },
-      { type: "14X", installments: 14, customerRate: 0.218, machineDiscountRate: 0.182 },
-      { type: "15X", installments: 15, customerRate: 0.232, machineDiscountRate: 0.198 },
-      { type: "16X", installments: 16, customerRate: 0.245, machineDiscountRate: 0.213 },
-      { type: "17X", installments: 17, customerRate: 0.26, machineDiscountRate: 0.233 },
-      { type: "18X", installments: 18, customerRate: 0.273, machineDiscountRate: 0.255 }
-    ];
-
     for (const rate of defaultRates) {
       await prisma.cardFeeRate.create({ data: rate });
+    }
+  } else {
+    // Atualiza taxas existentes caso ainda estejam sem os acréscimos fixos da planilha
+    const creditRate = await prisma.cardFeeRate.findUnique({ where: { type: "CREDITO" } });
+    if (creditRate && creditRate.fixedFee === 0 && creditRate.extraInstallmentFee === 0) {
+      for (const rate of defaultRates) {
+        await prisma.cardFeeRate.upsert({
+          where: { type: rate.type },
+          update: {
+            fixedFee: rate.fixedFee,
+            extraInstallmentFee: rate.extraInstallmentFee
+          },
+          create: rate
+        });
+      }
     }
   }
 
@@ -371,6 +386,8 @@ export async function ensureInitialSeed(): Promise<void> {
         orderDate: new Date("2026-10-26T12:00:00.000Z"),
         dollarRate: 5.47,
         surchargeFactor: 1.0,
+        secondarySurchargeFactor: 1.0,
+        expensesBrl: 0,
         previousBalance: -29174,
         totalOrderUsd: 3968,
         totalCostBrl: 21704.96,
@@ -378,10 +395,10 @@ export async function ensureInitialSeed(): Promise<void> {
         totalProfitBrl: 6075.04,
         items: {
           create: [
-            { quantity: 2, productName: "POCO C85 256GB 8GB RAM ROXO", storeCostUsd: 169, totalStoreCostUsd: 338, totalCostWithPctUsd: 338, costBrl: 1848.86, unitCostBrl: 924.43, unitSalePriceBrl: 1200, totalSalesBrl: 2400, totalProfitBrl: 551.14, unitProfitBrl: 275.57, marginPercent: 0.2981 },
-            { quantity: 2, productName: "POCO C85 256GB 8GB RAM PRETO", storeCostUsd: 167, totalStoreCostUsd: 334, totalCostWithPctUsd: 334, costBrl: 1826.98, unitCostBrl: 913.49, unitSalePriceBrl: 1200, totalSalesBrl: 2400, totalProfitBrl: 573.02, unitProfitBrl: 286.51, marginPercent: 0.3136 },
-            { quantity: 1, productName: "REDMI NOTE 17 PRO 5G 512GB 8GB RAM PRETO", storeCostUsd: 368, totalStoreCostUsd: 368, totalCostWithPctUsd: 368, costBrl: 2012.96, unitCostBrl: 2012.96, unitSalePriceBrl: 2550, totalSalesBrl: 2550, totalProfitBrl: 537.04, unitProfitBrl: 537.04, marginPercent: 0.2668 },
-            { quantity: 6, productName: "FIRE STICK 4K SELECT", storeCostUsd: 30, totalStoreCostUsd: 180, totalCostWithPctUsd: 180, costBrl: 984.6, unitCostBrl: 164.1, unitSalePriceBrl: 230, totalSalesBrl: 1380, totalProfitBrl: 395.4, unitProfitBrl: 65.9, marginPercent: 0.4016 }
+            { quantity: 2, productName: "POCO C85 256GB 8GB RAM ROXO", storeCostUsd: 169, totalStoreCostUsd: 338, totalCostWithPctUsd: 338, costBrl: 1848.86, totalCostWithExpensesBrl: 1848.86, unitCostBrl: 924.43, unitSalePriceBrl: 1200, totalSalesBrl: 2400, totalProfitBrl: 551.14, unitProfitBrl: 275.57, marginPercent: 0.2981 },
+            { quantity: 2, productName: "POCO C85 256GB 8GB RAM PRETO", storeCostUsd: 167, totalStoreCostUsd: 334, totalCostWithPctUsd: 334, costBrl: 1826.98, totalCostWithExpensesBrl: 1826.98, unitCostBrl: 913.49, unitSalePriceBrl: 1200, totalSalesBrl: 2400, totalProfitBrl: 573.02, unitProfitBrl: 286.51, marginPercent: 0.3136 },
+            { quantity: 1, productName: "REDMI NOTE 17 PRO 5G 512GB 8GB RAM PRETO", storeCostUsd: 368, totalStoreCostUsd: 368, totalCostWithPctUsd: 368, costBrl: 2012.96, totalCostWithExpensesBrl: 2012.96, unitCostBrl: 2012.96, unitSalePriceBrl: 2550, totalSalesBrl: 2550, totalProfitBrl: 537.04, unitProfitBrl: 537.04, marginPercent: 0.2668 },
+            { quantity: 6, productName: "FIRE STICK 4K SELECT", storeCostUsd: 30, totalStoreCostUsd: 180, totalCostWithPctUsd: 180, costBrl: 984.6, totalCostWithExpensesBrl: 984.6, unitCostBrl: 164.1, unitSalePriceBrl: 230, totalSalesBrl: 1380, totalProfitBrl: 395.4, unitProfitBrl: 65.9, marginPercent: 0.4016 }
           ]
         }
       }
@@ -394,6 +411,8 @@ export async function ensureInitialSeed(): Promise<void> {
         orderDate: new Date("2026-10-26T12:00:00.000Z"),
         dollarRate: 5.47,
         surchargeFactor: 1.15,
+        secondarySurchargeFactor: 1.15,
+        expensesBrl: 0,
         previousBalance: -29174,
         totalOrderUsd: 4986,
         totalCostBrl: 31364.43,
@@ -401,8 +420,8 @@ export async function ensureInitialSeed(): Promise<void> {
         totalProfitBrl: 4405.57,
         items: {
           create: [
-            { quantity: 3, productName: "POCO C85 256GB 8GB RAM ROXO", storeCostUsd: 167, totalStoreCostUsd: 501, totalCostWithPctUsd: 576.15, costBrl: 3151.54, unitCostBrl: 1050.51, unitSalePriceBrl: 1200, totalSalesBrl: 3600, totalProfitBrl: 448.46, unitProfitBrl: 149.49, marginPercent: 0.1423 },
-            { quantity: 3, productName: "POCO C85 256GB 8GB RAM PRETO", storeCostUsd: 169, totalStoreCostUsd: 507, totalCostWithPctUsd: 583.05, costBrl: 3189.28, unitCostBrl: 1063.09, unitSalePriceBrl: 1200, totalSalesBrl: 3600, totalProfitBrl: 410.72, unitProfitBrl: 136.91, marginPercent: 0.1288 }
+            { quantity: 3, productName: "POCO C85 256GB 8GB RAM ROXO", storeCostUsd: 167, totalStoreCostUsd: 501, totalCostWithPctUsd: 576.15, costBrl: 3151.54, totalCostWithExpensesBrl: 3151.54, unitCostBrl: 1050.51, unitSalePriceBrl: 1200, totalSalesBrl: 3600, totalProfitBrl: 448.46, unitProfitBrl: 149.49, marginPercent: 0.1423 },
+            { quantity: 3, productName: "POCO C85 256GB 8GB RAM PRETO", storeCostUsd: 169, totalStoreCostUsd: 507, totalCostWithPctUsd: 583.05, costBrl: 3189.28, totalCostWithExpensesBrl: 3189.28, unitCostBrl: 1063.09, unitSalePriceBrl: 1200, totalSalesBrl: 3600, totalProfitBrl: 410.72, unitProfitBrl: 136.91, marginPercent: 0.1288 }
           ]
         }
       }
@@ -415,6 +434,8 @@ export async function ensureInitialSeed(): Promise<void> {
         orderDate: new Date("2026-10-30T12:00:00.000Z"),
         dollarRate: 5.47,
         surchargeFactor: 1.0,
+        secondarySurchargeFactor: 1.0,
+        expensesBrl: 0,
         previousBalance: -29174,
         totalOrderUsd: 1845,
         totalCostBrl: 10092.15,
@@ -422,12 +443,69 @@ export async function ensureInitialSeed(): Promise<void> {
         totalProfitBrl: 3013.85,
         items: {
           create: [
-            { quantity: 1, productName: "MUTHUAN PERFUMES", storeCostUsd: 638.9, totalStoreCostUsd: 638.9, totalCostWithPctUsd: 638.9, costBrl: 3494.78, unitCostBrl: 3494.78, unitSalePriceBrl: 4836, totalSalesBrl: 4836, totalProfitBrl: 1341.22, unitProfitBrl: 1341.22, marginPercent: 0.3838 },
-            { quantity: 1, productName: "POCO C85 256GB 8GB RAM ROXO", storeCostUsd: 169, totalStoreCostUsd: 169, totalCostWithPctUsd: 169, costBrl: 924.43, unitCostBrl: 924.43, unitSalePriceBrl: 1200, totalSalesBrl: 1200, totalProfitBrl: 275.57, unitProfitBrl: 275.57, marginPercent: 0.2981 }
+            { quantity: 1, productName: "MUTHUAN PERFUMES", storeCostUsd: 638.9, totalStoreCostUsd: 638.9, totalCostWithPctUsd: 638.9, costBrl: 3494.78, totalCostWithExpensesBrl: 3494.78, unitCostBrl: 3494.78, unitSalePriceBrl: 4836, totalSalesBrl: 4836, totalProfitBrl: 1341.22, unitProfitBrl: 1341.22, marginPercent: 0.3838 },
+            { quantity: 1, productName: "POCO C85 256GB 8GB RAM ROXO", storeCostUsd: 169, totalStoreCostUsd: 169, totalCostWithPctUsd: 169, costBrl: 924.43, totalCostWithExpensesBrl: 924.43, unitCostBrl: 924.43, unitSalePriceBrl: 1200, totalSalesBrl: 1200, totalProfitBrl: 275.57, unitProfitBrl: 275.57, marginPercent: 0.2981 }
           ]
         }
       }
     });
+  } else {
+    // Atualiza itens existentes cujo totalCostWithExpensesBrl ainda seja 0
+    const zeroExpenseItems = await prisma.supplierOrderItem.findMany({
+      where: { totalCostWithExpensesBrl: 0 }
+    });
+    for (const item of zeroExpenseItems) {
+      await prisma.supplierOrderItem.update({
+        where: { id: item.id },
+        data: { totalCostWithExpensesBrl: item.costBrl }
+      });
+    }
+  }
+
+  // 9. Seed do Fechamento Mensal (Aba "TOTAL" - MÊS ANTERIOR = R$ 5.857,00 em Outubro/2026)
+  const existingClosing = await prisma.monthlyClosing.findUnique({
+    where: { month_year: { month: 10, year: 2026 } }
+  });
+  if (!existingClosing) {
+    await prisma.monthlyClosing.create({
+      data: {
+        month: 10,
+        year: 2026,
+        previousMonthExpense: 5857,
+        previousMonthBalance: 0,
+        huidaToBigTransfer: 0,
+        notes: "Fechamento Outubro 2026 (Mês Anterior aba TOTAL)"
+      }
+    });
+  }
+
+  // 10. Seed dos Totais Mensais Históricos de 2026 da Aba "Gastos BIG" (Jan a Ago)
+  const priorBigExpenses = await prisma.expense.count({
+    where: {
+      module: "BIG",
+      date: { lt: new Date("2026-10-01T00:00:00.000Z") }
+    }
+  });
+  if (priorBigExpenses === 0) {
+    const historicalBigTotals = [
+      { date: "2026-01-15", amount: 8345, description: "Consolidado Mensal Janeiro (Planilha Gastos BIG)" },
+      { date: "2026-02-15", amount: 9347, description: "Consolidado Mensal Fevereiro (Planilha Gastos BIG)" },
+      { date: "2026-03-15", amount: 7288, description: "Consolidado Mensal Março (Planilha Gastos BIG)" },
+      { date: "2026-04-15", amount: 5894, description: "Consolidado Mensal Abril (Planilha Gastos BIG)" },
+      { date: "2026-07-15", amount: 14022.51, description: "Consolidado Mensal Julho (Planilha Gastos BIG)" },
+      { date: "2026-08-15", amount: 7384, description: "Consolidado Mensal Agosto (Planilha Gastos BIG)" }
+    ];
+    for (const h of historicalBigTotals) {
+      await prisma.expense.create({
+        data: {
+          date: new Date(`${h.date}T12:00:00.000Z`),
+          module: "BIG",
+          category: "PROPAGANDA",
+          amount: h.amount,
+          description: h.description
+        }
+      });
+    }
   }
 
   const existingWarranties = await prisma.warrantyReceipt.count();

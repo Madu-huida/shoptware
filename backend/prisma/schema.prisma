@@ -15,29 +15,30 @@ datasource db {
 // ============================================================================
 
 model Product {
-  id           Int      @id @default(autoincrement())
-  name         String   // PRODUTO (ex: "REDMI NOTE 17 4G 256GB 8GB RAM PRETO", "Perfume Feminino Lattafa Yara Edp 100 ML")
-  category     String   @default("CELULAR") // "CELULAR", "ACESSORIO", "PERFUME_FEMININO", "PERFUME_UNISSEX", "PERFUME_MASCULINO", "OUTROS"
+  id              Int      @id @default(autoincrement())
+  name            String   // PRODUTO (ex: "REDMI NOTE 17 4G 256GB 8GB RAM PRETO", "Perfume Feminino Lattafa Yara Edp 100 ML")
+  category        String   @default("CELULAR") // "CELULAR", "PECA", "ACESSORIO", "PERFUME_FEMININO", "PERFUME_UNISSEX", "PERFUME_MASCULINO", "OUTROS"
   
   // Controle de Lotes e Quantidade (Aba "Estoque ")
-  lote1        Int      @default(0) // Coluna LOTE1
-  lote2        Int      @default(0) // Coluna LOTE 2
-  lote3        Int      @default(0) // Coluna LOTE3
-  quantity     Int      @default(0) // Quantidade total disponível (soma dos lotes ou estoque geral)
-  inAssistance Int      @default(0) // Seção ASSISTENCIA na aba "Estoque "
+  lote1           Int      @default(0) // Coluna LOTE1
+  lote2           Int      @default(0) // Coluna LOTE 2
+  lote3           Int      @default(0) // Coluna LOTE3
+  quantity        Int      @default(0) // Quantidade total disponível (soma dos lotes ou estoque geral)
+  inAssistance    Int      @default(0) // Seção ASSISTENCIA na aba "Estoque "
+  assistanceNotes String?  // Observações de assistência técnica (qual aparelho/cliente está em assistência)
 
   // Valores e Custos (Abas "Estoque " e "perfumes")
-  salePrice    Float    // VENDAS / VALOR VENDA (R$)
-  costPrice    Float    @default(0) // CUSTO / VALOR CUSTO R$
-  costDollar   Float?   // VALOR DOLLAR (US$ - específico para Perfumes / Importados)
-  dollarRate   Float?   // COTAÇAO do dólar usada no custo (ex: 5.50)
+  salePrice       Float    // VENDAS / VALOR VENDA (R$)
+  costPrice       Float    @default(0) // CUSTO / VALOR CUSTO R$
+  costDollar      Float?   // VALOR DOLLAR (US$ - específico para Perfumes / Importados)
+  dollarRate      Float?   // COTAÇAO do dólar usada no custo (ex: 5.50)
 
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   // Relacionamentos
-  sales        Sale[]
+  sales           Sale[]
 }
 
 model PhysicalStockCheck {
@@ -64,15 +65,17 @@ model Sale {
   productName    String   // PRODUTO (mantém o histórico textual exato da planilha)
 
   // Valores Financeiros da Venda
-  grossValue     Float    // VALOR BRUTO (valor cobrado do cliente)
-  netSaleValue   Float    // VENDAS (valor líquido recebido após taxa da maquininha)
-  stockValue     Float    // VALOR ESTOQUE (custo/tabela base do produto no estoque)
-  extraValue     Float    @default(0) // EXTRA (valores adicionais ou ajustes da linha)
-  deliveryFee    Float    @default(0) // MOTO (taxa de entrega do motoboy)
-  paymentMethod  String   // PAGAMENTO (ex: "PIX MASTER", "PAG SEGURO", "DINHEIRO", "NU BANK", "LINK NU", "PAG JERUSA")
-  cooperValue    Float    @default(0) // COOPER (repasse cooperativa / dinheiro motoboy)
-  ricocheteValue Float    @default(0) // RICOCHETE
-  difference     Float    // DIFERENÇA (fórmula da planilha: netSaleValue - stockValue - deliveryFee - extraValue)
+  grossValue             Float    // VALOR BRUTO (valor cobrado do cliente)
+  secondaryNetValue      Float    @default(0) // Segundo pagamento líquido (Coluna J:K da planilha)
+  secondaryPaymentMethod String?  // Forma de pagamento secundária opcional
+  netSaleValue           Float    // VENDAS (valor líquido recebido após taxa da maquininha - Coluna L:M)
+  stockValue             Float    // VALOR ESTOQUE (custo/tabela base do produto no estoque)
+  extraValue             Float    @default(0) // EXTRA (valores adicionais ou ajustes da linha)
+  deliveryFee            Float    @default(0) // MOTO (taxa de entrega do motoboy)
+  paymentMethod          String   // PAGAMENTO (ex: "PIX MASTER", "PAG SEGURO", "DINHEIRO", "NU BANK", "LINK NU", "PAG JERUSA")
+  cooperValue            Float    @default(0) // COOPER (repasse cooperativa / dinheiro motoboy)
+  ricocheteValue         Float    @default(0) // RICOCHETE
+  difference             Float    // DIFERENÇA (fórmula da planilha: (secondaryNetValue + netSaleValue) - stockValue - deliveryFee - extraValue)
 
   // Controle de Cancelamento e Origem (Regra de Negócio: PC vs Celular)
   status         String   @default("COMPLETED") // "COMPLETED" | "CANCELLED" (ao cancelar, retorna ao estoque)
@@ -128,6 +131,20 @@ model DailyAccountBalance {
   @@unique([date, accountId])
 }
 
+model MonthlyClosing {
+  id                   Int      @id @default(autoincrement())
+  month                Int      // Mês (1 a 12)
+  year                 Int      // Ano (ex: 2026)
+  previousMonthExpense Float    @default(0) // MÊS ANTERIOR nos Gastos (ex: R$ 5.857,00)
+  previousMonthBalance Float    @default(0) // MÊS ANTERIOR no Saldo Geral / Faturamento
+  huidaToBigTransfer   Float    @default(0) // SAIDAS HUIDA PARA BIG
+  notes                String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([month, year])
+}
+
 // ============================================================================
 // 4. MÓDULO DE DESPESAS E CONTAS A PAGAR
 // (Abas: "Gastos", "Gastos CARTÃO", "GASTOS TRANSPORTES", "Gastos Compras", "Gastos BIG" e "CONTAS")
@@ -174,41 +191,58 @@ model PayableBill {
 // ============================================================================
 
 model SupplierOrder {
-  id              Int                 @id @default(autoincrement())
-  tabName         String              // Nome da aba/lote (ex: "Paraguai Marcio", "Paraguai edi", "Paraguia 30-10")
-  supplierName    String              @default("JAPA") // Fornecedor (ex: "JAPA")
-  orderDate       DateTime            @default(now())  // DATA
-  dollarRate      Float               @default(5.47)   // DOLLAR (Cotação do pedido)
-  surchargeFactor Float               @default(1.0)    // PORCENTAGEM (ex: 1.0 ou 1.15 para 15% de freteiro)
-  discount        Float               @default(0)      // DESCONTO
-  adjustments     Float               @default(0)      // AJUSTES
-  previousBalance Float               @default(0)      // SALDO ANTERIOR (ex: -29174)
-  totalOrderUsd   Float               @default(0)      // TOTAL PEDIDO (US$)
-  totalCostBrl    Float               @default(0)      // TOTAL CUSTO (R$)
-  totalSalesBrl   Float               @default(0)      // TOTAL VENDAS (R$)
-  totalProfitBrl  Float               @default(0)      // LUCRO TOTAL (R$)
-  notes           String?
-  items           SupplierOrderItem[]
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  id                       Int                   @id @default(autoincrement())
+  tabName                  String                // Nome da aba/lote (ex: "Paraguai Marcio", "Paraguai edi", "Paraguia 30-10")
+  supplierName             String                @default("JAPA") // Fornecedor (ex: "JAPA")
+  orderDate                DateTime              @default(now())  // DATA
+  dollarRate               Float                 @default(5.47)   // DOLLAR (Cotação do pedido)
+  surchargeFactor          Float                 @default(1.0)    // PORCENTAGEM (ex: 1.0 ou 1.15 para 15% de freteiro)
+  secondarySurchargeFactor Float                 @default(1.0)    // PORCENTAGEM SEGUNDA (célula AB20)
+  expensesBrl              Float                 @default(0)      // DESPESAS do pedido em R$ (célula AB16 para rateio nos itens)
+  discount                 Float                 @default(0)      // DESCONTO (US$)
+  adjustments              Float                 @default(0)      // AJUSTES (R$)
+  previousBalance          Float                 @default(-29174) // SALDO ANTERIOR (ex: -29174)
+  totalOrderUsd            Float                 @default(0)      // TOTAL PEDIDO (US$)
+  totalCostBrl             Float                 @default(0)      // TOTAL CUSTO (R$)
+  totalSalesBrl            Float                 @default(0)      // TOTAL VENDAS (R$)
+  totalProfitBrl           Float                 @default(0)      // LUCRO TOTAL (R$)
+  notes                    String?
+  items                    SupplierOrderItem[]
+  transactions             SupplierTransaction[]
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
 }
 
 model SupplierOrderItem {
-  id                  Int           @id @default(autoincrement())
-  orderId             Int
-  order               SupplierOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  quantity            Int           @default(1) // QTD
-  productName         String        // PRODUTO (ex: "POCO C85 256GB 8GB RAM ROXO", "MUTHUAN PERFUMES")
-  storeCostUsd        Float         // CUSTO LOJA (US$)
-  totalStoreCostUsd   Float         // CUSTO TOTAL LOJA (US$)
-  totalCostWithPctUsd Float         // CUSTO TOTAL % (US$ com porcentagem do freteiro)
-  costBrl             Float         // CUSTO REAIS / CUSTO TOTAL (R$)
-  unitCostBrl         Float         // CUSTO UNITARIO (R$)
-  unitSalePriceBrl    Float         // Preço de venda unitário previsto (R$)
-  totalSalesBrl       Float         // TOTAL VENDAS (R$)
-  totalProfitBrl      Float         // LUCRO total do item (R$)
-  unitProfitBrl       Float         // Lucro unitário (R$)
-  marginPercent       Float         // % (Margem de lucro)
+  id                       Int           @id @default(autoincrement())
+  orderId                  Int
+  order                    SupplierOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  quantity                 Int           @default(1) // QTD
+  productName              String        // PRODUTO (ex: "POCO C85 256GB 8GB RAM ROXO", "MUTHUAN PERFUMES")
+  storeCostUsd             Float         // CUSTO LOJA (US$)
+  totalStoreCostUsd        Float         // CUSTO TOTAL LOJA (US$)
+  totalCostWithPctUsd      Float         // CUSTO TOTAL % (US$ com porcentagem do freteiro)
+  costBrl                  Float         // CUSTO REAIS (R$ - coluna M)
+  totalCostWithExpensesBrl Float         @default(0) // CUSTO TOTAL com rateio de despesas (R$ - coluna O: (M9 * (expensesBrl / totalCostBrl)) + M9)
+  unitCostBrl              Float         // CUSTO UNITARIO (R$)
+  unitSalePriceBrl         Float         // Preço de venda unitário previsto (R$)
+  totalSalesBrl            Float         // TOTAL VENDAS (R$)
+  totalProfitBrl           Float         // LUCRO total do item (R$)
+  unitProfitBrl            Float         // Lucro unitário (R$)
+  marginPercent            Float         // % (Margem de lucro)
+}
+
+model SupplierTransaction {
+  id           Int            @id @default(autoincrement())
+  supplierName String         @default("JAPA") // Fornecedor (ex: "JAPA")
+  orderId      Int?
+  order        SupplierOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  date         DateTime       @default(now())
+  type         String         // "DEPOSITO" | "NOTA" (colunas DEPOSITOS e NOTAS na planilha)
+  amount       Float          // Valor lançado
+  description  String?        // Loja / Observação (ex: "LOJA", "PIX", etc.)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 }
 
 model WarrantyReceipt {
@@ -265,6 +299,8 @@ model CardFeeRate {
   type                String   @unique // TIPO: "DEBITO", "CREDITO", "2X", "3X" ... "18X"
   installments        Int      @default(1) // Número de parcelas (1 a 18)
   customerRate        Float    // % repassada ao cliente para simular VALOR FINAL (ex: 0.0141, 0.0331, 0.062...)
+  fixedFee            Float    @default(0) // Acréscimo fixo (R$) na coluna VALOR da taxa (ex: +5 no Crédito 1x, +3*parcela de 2x a 12x)
+  extraInstallmentFee Float    @default(0) // Acréscimo fixo (R$) no VALOR FINAL (ex: +3 no Crédito 1x, +3*parcela de 2x a 12x)
   machineDiscountRate Float    // TAXA descontada pela maquininha no RECEBER (ex: 0.0141, 0.0331, 0.069...)
   active              Boolean  @default(true)
   createdAt           DateTime @default(now())
