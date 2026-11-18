@@ -42,6 +42,8 @@ export const productController = {
 
           if (item.category === "CELULAR") {
             acc.totalCellphones += item.quantity;
+          } else if (item.category === "PECA") {
+            acc.totalPieces += item.quantity;
           }
 
           return acc;
@@ -49,6 +51,7 @@ export const productController = {
         {
           totalQuantity: 0,
           totalCellphones: 0,
+          totalPieces: 0,
           totalLote1: 0,
           totalLote2: 0,
           totalLote3: 0,
@@ -95,6 +98,7 @@ export const productController = {
         lote3 = 0,
         quantity,
         inAssistance = 0,
+        assistanceNotes,
         salePrice,
         costPrice,
         costDollar,
@@ -135,6 +139,7 @@ export const productController = {
           lote3: l3,
           quantity: finalQuantity,
           inAssistance: Number(inAssistance) || 0,
+          assistanceNotes: assistanceNotes ? String(assistanceNotes).trim() : null,
           salePrice: Number(salePrice),
           costPrice: calculatedCostBrl,
           costDollar: parsedCostDollar,
@@ -170,6 +175,7 @@ export const productController = {
         lote3,
         quantity,
         inAssistance,
+        assistanceNotes,
         salePrice,
         costPrice,
         costDollar,
@@ -211,6 +217,12 @@ export const productController = {
           lote3: l3,
           quantity: finalQuantity,
           inAssistance: inAssistance !== undefined ? Number(inAssistance) : existing.inAssistance,
+          assistanceNotes:
+            assistanceNotes !== undefined
+              ? assistanceNotes
+                ? String(assistanceNotes).trim()
+                : null
+              : existing.assistanceNotes,
           salePrice: salePrice !== undefined ? Number(salePrice) : existing.salePrice,
           costPrice: nextCostPrice,
           costDollar: nextCostDollar,

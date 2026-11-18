@@ -99,10 +99,62 @@ export const expenseController = {
         where.date = { gte: start, lte: end };
       }
 
-      const expenses = await prisma.expense.findMany({
+      const rawExpenses = await prisma.expense.findMany({
         where,
         orderBy: [{ date: "desc" }, { id: "desc" }]
       });
+
+      // Consolida automaticamente os lançamentos diários de CARTAO (Aba Gastos CARTÃO)
+      // na linha diária de CARTAO CREDITO da aba Gastos (GERAL) sem duplicar no total consolidado
+      const cardByDay = new Map<string, { sum: number; date: Date; count: number }>();
+      const geralCardByDay = new Map<string, number>();
+
+      for (const exp of rawExpenses) {
+        const dayKey = exp.date.toISOString().slice(0, 10);
+        if (exp.module === "CARTAO") {
+          const prev = cardByDay.get(dayKey);
+          cardByDay.set(dayKey, {
+            sum: Number(((prev?.sum || 0) + exp.amount).toFixed(2)),
+            date: exp.date,
+            count: (prev?.count || 0) + 1
+          });
+        } else if (exp.module === "GERAL" && exp.category === "CARTAO CREDITO") {
+          geralCardByDay.set(dayKey, Number(((geralCardByDay.get(dayKey) || 0) + exp.amount).toFixed(2)));
+        }
+      }
+
+      const syntheticGeralCardEntries: Array<{
+        id: number;
+        date: Date;
+        module: string;
+        category: string;
+        amount: number;
+        description: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+      }> = [];
+
+      for (const [dayKey, info] of cardByDay.entries()) {
+        const existingGeralOnDay = geralCardByDay.get(dayKey) || 0;
+        const autoIncrement = Number(Math.max(0, info.sum - existingGeralOnDay).toFixed(2));
+        if (autoIncrement > 0) {
+          const syntheticId = -Number(dayKey.replace(/-/g, ""));
+          syntheticGeralCardEntries.push({
+            id: syntheticId,
+            date: info.date,
+            module: "GERAL",
+            category: "CARTAO CREDITO",
+            amount: autoIncrement,
+            description: `Soma diária automática — Aba Gastos CARTÃO (${info.count} lanç.)`,
+            createdAt: info.date,
+            updatedAt: info.date
+          });
+        }
+      }
+
+      const expenses = [...rawExpenses, ...syntheticGeralCardEntries].sort(
+        (a, b) => b.date.getTime() - a.date.getTime()
+      );
 
       const byModule: Record<string, number> = {};
       const byCategory: Record<string, number> = {};
@@ -111,7 +163,30 @@ export const expenseController = {
       for (const exp of expenses) {
         byModule[exp.module] = Number(((byModule[exp.module] || 0) + exp.amount).toFixed(2));
         byCategory[exp.category] = Number(((byCategory[exp.category] || 0) + exp.amount).toFixed(2));
-        grandTotal = Number((grandTotal + exp.amount).toFixed(2));
+        // Evita somar CARTAO duas vezes no grandTotal geral pois já está refletido em GERAL -> CARTAO CREDITO
+        if (exp.module !== "CARTAO") {
+          grandTotal = Number((grandTotal + exp.amount).toFixed(2));
+        }
+      }
+
+      // Quadro anual TOTAIS MENSAL (Jan–Dez) da aba Gastos BIG
+      const targetYear = year ? Number(year) : 2026;
+      const yearStart = new Date(Date.UTC(targetYear, 0, 1, 0, 0, 0, 0));
+      const yearEnd = new Date(Date.UTC(targetYear, 11, 31, 23, 59, 59, 999));
+      const bigYearExpenses = await prisma.expense.findMany({
+        where: {
+          module: "BIG",
+          date: { gte: yearStart, lte: yearEnd }
+        }
+      });
+
+      const bigMonthlyTotals: Record<number, number> = {};
+      for (let m = 1; m <= 12; m++) {
+        bigMonthlyTotals[m] = 0;
+      }
+      for (const bExp of bigYearExpenses) {
+        const m = bExp.date.getUTCMonth() + 1;
+        bigMonthlyTotals[m] = Number(((bigMonthlyTotals[m] || 0) + bExp.amount).toFixed(2));
       }
 
       res.json({
@@ -119,7 +194,9 @@ export const expenseController = {
         summary: {
           grandTotal,
           byModule,
-          byCategory
+          byCategory,
+          bigMonthlyTotals,
+          year: targetYear
         }
       });
     } catch (error) {

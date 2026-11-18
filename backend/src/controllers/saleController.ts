@@ -5,11 +5,12 @@ import { emitRealtimeEvent } from "../lib/socket";
 
 function calculateDifference(
   netSaleValue: number,
+  secondaryNetValue: number,
   stockValue: number,
   deliveryFee: number,
   extraValue: number
 ): number {
-  return Number((netSaleValue - stockValue - deliveryFee - extraValue).toFixed(2));
+  return Number(((secondaryNetValue + netSaleValue) - stockValue - deliveryFee - extraValue).toFixed(2));
 }
 
 function normalizeDayRange(dateInput: Date | string): { start: Date; end: Date; utcMidnight: Date } {
@@ -33,7 +34,11 @@ async function syncDailyEntrySales(tx: Prisma.TransactionClient, targetDate: Dat
     }
   });
 
-  const cellSales = Number(daySales.reduce((acc, s) => acc + s.netSaleValue, 0).toFixed(2));
+  const cellSales = Number(
+    daySales
+      .reduce((acc, s) => acc + s.netSaleValue + (s.secondaryNetValue || 0), 0)
+      .toFixed(2)
+  );
   const quantity = daySales.reduce((acc, s) => acc + s.quantity, 0);
 
   await tx.dailyEntry.upsert({
@@ -144,6 +149,9 @@ export const saleController = {
           if (s.status === "COMPLETED") {
             acc.totalQuantity += s.quantity;
             acc.totalGrossValue = Number((acc.totalGrossValue + s.grossValue).toFixed(2));
+            acc.totalSecondaryNetValue = Number(
+              (acc.totalSecondaryNetValue + (s.secondaryNetValue || 0)).toFixed(2)
+            );
             acc.totalNetSaleValue = Number((acc.totalNetSaleValue + s.netSaleValue).toFixed(2));
             acc.totalStockValue = Number((acc.totalStockValue + s.stockValue).toFixed(2));
             acc.totalExtraValue = Number((acc.totalExtraValue + s.extraValue).toFixed(2));
@@ -157,6 +165,7 @@ export const saleController = {
         {
           totalQuantity: 0,
           totalGrossValue: 0,
+          totalSecondaryNetValue: 0,
           totalNetSaleValue: 0,
           totalStockValue: 0,
           totalExtraValue: 0,
@@ -184,6 +193,8 @@ export const saleController = {
         productId,
         productName,
         grossValue = 0,
+        secondaryNetValue = 0,
+        secondaryPaymentMethod,
         netSaleValue,
         stockValue,
         extraValue = 0,
@@ -224,13 +235,20 @@ export const saleController = {
         }
 
         const parsedGross = Number(grossValue) || 0;
+        const parsedSecondaryNet = Number(secondaryNetValue) || 0;
         const parsedNet = netSaleValue !== undefined ? Number(netSaleValue) : parsedGross;
         const parsedExtra = Number(extraValue) || 0;
         const parsedMoto = Number(deliveryFee) || 0;
         const parsedCooper = Number(cooperValue) || 0;
         const parsedRicochete = Number(ricocheteValue) || 0;
 
-        const diff = calculateDifference(parsedNet, resolvedStockValue, parsedMoto, parsedExtra);
+        const diff = calculateDifference(
+          parsedNet,
+          parsedSecondaryNet,
+          resolvedStockValue,
+          parsedMoto,
+          parsedExtra
+        );
         const targetSaleDate = saleDate ? new Date(saleDate) : new Date();
 
         const sale = await tx.sale.create({
@@ -241,6 +259,10 @@ export const saleController = {
             productId: parsedProductId,
             productName: resolvedProductName,
             grossValue: parsedGross,
+            secondaryNetValue: parsedSecondaryNet,
+            secondaryPaymentMethod: secondaryPaymentMethod
+              ? String(secondaryPaymentMethod).trim().toUpperCase()
+              : null,
             netSaleValue: parsedNet,
             stockValue: resolvedStockValue,
             extraValue: parsedExtra,
@@ -289,6 +311,8 @@ export const saleController = {
           productId,
           productName,
           grossValue,
+          secondaryNetValue,
+          secondaryPaymentMethod,
           netSaleValue,
           stockValue,
           extraValue,
@@ -313,11 +337,19 @@ export const saleController = {
         }
 
         const nextGross = grossValue !== undefined ? Number(grossValue) : existing.grossValue;
+        const nextSecondaryNet =
+          secondaryNetValue !== undefined ? Number(secondaryNetValue) : existing.secondaryNetValue;
         const nextNet = netSaleValue !== undefined ? Number(netSaleValue) : existing.netSaleValue;
         const nextStockVal = stockValue !== undefined ? Number(stockValue) : existing.stockValue;
         const nextExtra = extraValue !== undefined ? Number(extraValue) : existing.extraValue;
         const nextMoto = deliveryFee !== undefined ? Number(deliveryFee) : existing.deliveryFee;
-        const nextDiff = calculateDifference(nextNet, nextStockVal, nextMoto, nextExtra);
+        const nextDiff = calculateDifference(
+          nextNet,
+          nextSecondaryNet,
+          nextStockVal,
+          nextMoto,
+          nextExtra
+        );
         const nextDate = saleDate ? new Date(saleDate) : existing.saleDate;
 
         const sale = await tx.sale.update({
@@ -330,6 +362,13 @@ export const saleController = {
             productId: nextProductId,
             productName: productName !== undefined ? String(productName).trim() : existing.productName,
             grossValue: nextGross,
+            secondaryNetValue: nextSecondaryNet,
+            secondaryPaymentMethod:
+              secondaryPaymentMethod !== undefined
+                ? secondaryPaymentMethod
+                  ? String(secondaryPaymentMethod).trim().toUpperCase()
+                  : null
+                : existing.secondaryPaymentMethod,
             netSaleValue: nextNet,
             stockValue: nextStockVal,
             extraValue: nextExtra,

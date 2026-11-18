@@ -4,22 +4,27 @@ import { prisma } from "../lib/prisma";
 import { emitRealtimeEvent } from "../lib/socket";
 
 export const financialController = {
-  // Dashboard Geral (Replica a aba "TOTAL" consolidando Entradas, Estoque e Gastos do mês/período)
+  // Dashboard Geral (Replica a aba "TOTAL" consolidando Entradas, Estoque, Fechamento Mês Anterior e Gastos)
   async getDashboard(req: Request, res: Response): Promise<void> {
     try {
       const { month, year } = req.query;
 
       let dateFilter: { gte: Date; lte: Date } | undefined;
+      let parsedMonth: number | null = null;
+      let parsedYear: number | null = null;
+
       if (month && year) {
-        const m = Number(month) - 1;
-        const y = Number(year);
+        parsedMonth = Number(month);
+        parsedYear = Number(year);
+        const m = parsedMonth - 1;
+        const y = parsedYear;
         dateFilter = {
           gte: new Date(Date.UTC(y, m, 1, 0, 0, 0, 0)),
           lte: new Date(Date.UTC(y, m + 1, 0, 23, 59, 59, 999))
         };
       }
 
-      const [entries, sales, expenses, products, bills, accounts] = await Promise.all([
+      const [entries, sales, expenses, products, bills, accounts, closings] = await Promise.all([
         prisma.dailyEntry.findMany({
           where: dateFilter ? { date: dateFilter } : undefined
         }),
@@ -44,11 +49,20 @@ export const financialController = {
               take: 1
             }
           }
+        }),
+        prisma.monthlyClosing.findMany({
+          where:
+            parsedMonth && parsedYear
+              ? { month: parsedMonth, year: parsedYear }
+              : undefined
         })
       ]);
 
-      // Total Vendas: maior entre a soma de vendas registradas na tabela Sale ou lançadas em DailyEntry
-      const salesFromTable = sales.reduce((acc, s) => acc + s.netSaleValue, 0);
+      // Total Vendas: maior entre a soma de vendas registradas na tabela Sale (netSaleValue + secondaryNetValue) ou lançadas em DailyEntry
+      const salesFromTable = sales.reduce(
+        (acc, s) => acc + s.netSaleValue + (s.secondaryNetValue || 0),
+        0
+      );
       const salesFromEntries = entries.reduce((acc, e) => acc + e.cellSales, 0);
       const totalVendas = Number(Math.max(salesFromTable, salesFromEntries).toFixed(2));
 
@@ -64,7 +78,54 @@ export const financialController = {
         products.reduce((acc, p) => acc + p.quantity * p.salePrice, 0).toFixed(2)
       );
 
-      // Gastos por módulo
+      // Consolidação de Gastos por módulo sem duplicar CARTAO CREDITO nos dias em que GERAL já espelha a aba CARTAO
+      const cardSumsByDay = new Map<string, number>();
+      for (const exp of expenses) {
+        if (exp.module === "CARTAO") {
+          const dayKey = exp.date.toISOString().slice(0, 10);
+          cardSumsByDay.set(dayKey, Number(((cardSumsByDay.get(dayKey) || 0) + exp.amount).toFixed(2)));
+        }
+      }
+
+      let gastosGeralNonCard = 0;
+      const geralDirectCardByDay = new Map<string, number>();
+
+      for (const exp of expenses) {
+        if (exp.module === "GERAL") {
+          if (exp.category === "CARTAO CREDITO") {
+            const dayKey = exp.date.toISOString().slice(0, 10);
+            geralDirectCardByDay.set(
+              dayKey,
+              Number(((geralDirectCardByDay.get(dayKey) || 0) + exp.amount).toFixed(2))
+            );
+          } else {
+            gastosGeralNonCard = Number((gastosGeralNonCard + exp.amount).toFixed(2));
+          }
+        }
+      }
+
+      // Para cada dia com gastos de cartão (aba Gastos CARTÃO ou lançamento direto em CARTAO CREDITO),
+      // se o dia possui lançamento espelho "Fatura cartão" e lançamentos em CARTAO, usa o maior / soma sem duplicar
+      const allCardDays = new Set<string>([
+        ...cardSumsByDay.keys(),
+        ...geralDirectCardByDay.keys()
+      ]);
+      let totalCartaoConsolidadoEmGeral = 0;
+      for (const dayKey of allCardDays) {
+        const fromCardTab = cardSumsByDay.get(dayKey) || 0;
+        const fromGeralDirect = geralDirectCardByDay.get(dayKey) || 0;
+        if (fromCardTab > 0 && fromGeralDirect > 0) {
+          // Evita duplicar quando o lançamento de GERAL era o espelho da aba CARTAO no mesmo dia
+          totalCartaoConsolidadoEmGeral = Number(
+            (totalCartaoConsolidadoEmGeral + Math.max(fromCardTab, fromGeralDirect)).toFixed(2)
+          );
+        } else {
+          totalCartaoConsolidadoEmGeral = Number(
+            (totalCartaoConsolidadoEmGeral + fromCardTab + fromGeralDirect).toFixed(2)
+          );
+        }
+      }
+
       const gastosPorModulo = expenses.reduce(
         (acc, exp) => {
           acc[exp.module] = Number(((acc[exp.module] || 0) + exp.amount).toFixed(2));
@@ -73,23 +134,49 @@ export const financialController = {
         {} as Record<string, number>
       );
 
-      const gastosGeral = Number(
-        ((gastosPorModulo["GERAL"] || 0) + (gastosPorModulo["CARTAO"] || 0)).toFixed(2)
-      );
+      const gastosGeral = Number((gastosGeralNonCard + totalCartaoConsolidadoEmGeral).toFixed(2));
+      const gastosCartao = Number((gastosPorModulo["CARTAO"] || 0).toFixed(2));
       const gastosCompras = Number((gastosPorModulo["COMPRAS"] || 0).toFixed(2));
       const gastosBig = Number((gastosPorModulo["BIG"] || 0).toFixed(2));
       const gastosHuidaTransportes = Number((gastosPorModulo["TRANSPORTE"] || 0).toFixed(2));
 
-      // Saldos conforme fórmulas da aba "TOTAL"
-      // SALDO VENDAS = TOTAL VENDAS + OUTRAS ENTRADAS + ALUGUEIS - GASTOS COMPRAS - GASTOS BIG - GASTOS GERAL
+      // Fechamentos de Mês Anterior e Transferências Internas (Tabela MonthlyClosing)
+      const previousMonthExpense = Number(
+        closings.reduce((acc, c) => acc + c.previousMonthExpense, 0).toFixed(2)
+      );
+      const previousMonthBalance = Number(
+        closings.reduce((acc, c) => acc + c.previousMonthBalance, 0).toFixed(2)
+      );
+      const huidaToBigTransfer = Number(
+        closings.reduce((acc, c) => acc + c.huidaToBigTransfer, 0).toFixed(2)
+      );
+
+      // Saldos conforme fórmulas da aba "TOTAL":
+      // SALDO VENDAS = TOTAL VENDAS + OUTRAS + ALUGUEIS + MÊS ANTERIOR (Saldo) + SAIDAS HUIDA P/ BIG - GASTOS COMPRAS - GASTOS BIG - GASTOS GERAL - MÊS ANTERIOR (Gastos)
       const totalFaturado = Number(
-        (totalVendas + totalHuidaTransportes + totalAlugueis + totalOutrasEntradas).toFixed(2)
+        (
+          totalVendas +
+          totalHuidaTransportes +
+          totalAlugueis +
+          totalOutrasEntradas +
+          previousMonthBalance
+        ).toFixed(2)
       );
       const saldoHuidaTransportes = Number(
-        (totalHuidaTransportes - gastosHuidaTransportes).toFixed(2)
+        (totalHuidaTransportes - gastosHuidaTransportes - huidaToBigTransfer).toFixed(2)
       );
       const saldoVendas = Number(
-        (totalVendas + totalOutrasEntradas + totalAlugueis - gastosCompras - gastosBig - gastosGeral).toFixed(2)
+        (
+          totalVendas +
+          totalOutrasEntradas +
+          totalAlugueis +
+          previousMonthBalance +
+          huidaToBigTransfer -
+          gastosCompras -
+          gastosBig -
+          gastosGeral -
+          previousMonthExpense
+        ).toFixed(2)
       );
 
       // Saldo Real das Contas (Aba "Valores Real") ou Saldo Consolidado
@@ -102,10 +189,19 @@ export const financialController = {
 
       const saldoGeral =
         saldoContasReais !== 0
-          ? saldoContasReais
+          ? Number((saldoContasReais + previousMonthBalance).toFixed(2))
           : Number((saldoVendas + saldoHuidaTransportes + valorEstoqueAtual).toFixed(2));
 
       const totalContasAPagar = Number(bills.reduce((acc, b) => acc + b.amount, 0).toFixed(2));
+
+      const currentClosing = closings[0] || {
+        month: parsedMonth || new Date().getUTCMonth() + 1,
+        year: parsedYear || new Date().getUTCFullYear(),
+        previousMonthExpense: 0,
+        previousMonthBalance: 0,
+        huidaToBigTransfer: 0,
+        notes: null
+      };
 
       res.json({
         totals: {
@@ -119,11 +215,16 @@ export const financialController = {
           outrasEntradas: totalOutrasEntradas,
           estoque: valorEstoqueAtual,
           gastosGeral,
+          gastosCartao,
           gastosCompras,
           gastosBig,
           gastosHuidaTransportes,
+          previousMonthExpense,
+          previousMonthBalance,
+          huidaToBigTransfer,
           totalContasAPagar
         },
+        monthlyClosing: currentClosing,
         counts: {
           salesCount: sales.length,
           productsInStock: products.reduce((acc, p) => acc + p.quantity, 0),
@@ -133,6 +234,57 @@ export const financialController = {
     } catch (error) {
       console.error("Erro ao carregar dashboard financeiro:", error);
       res.status(500).json({ error: "Erro ao carregar dados do dashboard financeiro." });
+    }
+  },
+
+  // Salvar / Atualizar Fechamento Mensal (Mês Anterior nos Gastos, Mês Anterior no Saldo Geral e Saídas Huida para BIG)
+  async upsertMonthlyClosing(req: Request, res: Response): Promise<void> {
+    try {
+      const {
+        month,
+        year,
+        previousMonthExpense = 0,
+        previousMonthBalance = 0,
+        huidaToBigTransfer = 0,
+        notes
+      } = req.body;
+
+      const parsedMonth = Number(month);
+      const parsedYear = Number(year);
+
+      if (!parsedMonth || !parsedYear || parsedMonth < 1 || parsedMonth > 12) {
+        res.status(400).json({ error: "Mês (1-12) e ano válidos são obrigatórios." });
+        return;
+      }
+
+      const closing = await prisma.monthlyClosing.upsert({
+        where: {
+          month_year: {
+            month: parsedMonth,
+            year: parsedYear
+          }
+        },
+        update: {
+          previousMonthExpense: Number(previousMonthExpense) || 0,
+          previousMonthBalance: Number(previousMonthBalance) || 0,
+          huidaToBigTransfer: Number(huidaToBigTransfer) || 0,
+          notes: notes !== undefined ? (notes ? String(notes).trim() : null) : undefined
+        },
+        create: {
+          month: parsedMonth,
+          year: parsedYear,
+          previousMonthExpense: Number(previousMonthExpense) || 0,
+          previousMonthBalance: Number(previousMonthBalance) || 0,
+          huidaToBigTransfer: Number(huidaToBigTransfer) || 0,
+          notes: notes ? String(notes).trim() : null
+        }
+      });
+
+      emitRealtimeEvent("financial:updated", { action: "monthly_closing_upserted", closing });
+      res.json(closing);
+    } catch (error) {
+      console.error("Erro ao salvar fechamento mensal:", error);
+      res.status(500).json({ error: "Erro ao salvar fechamento mensal da aba TOTAL." });
     }
   },
 
@@ -384,7 +536,15 @@ export const financialController = {
 
   async upsertCardFee(req: Request, res: Response): Promise<void> {
     try {
-      const { type, installments = 1, customerRate, machineDiscountRate, active = true } = req.body;
+      const {
+        type,
+        installments = 1,
+        customerRate,
+        fixedFee,
+        extraInstallmentFee,
+        machineDiscountRate,
+        active = true
+      } = req.body;
 
       if (!type || customerRate === undefined || machineDiscountRate === undefined) {
         res.status(400).json({ error: "Tipo, taxa cliente e taxa maquininha são obrigatórios." });
@@ -392,19 +552,52 @@ export const financialController = {
       }
 
       const normalizedType = String(type).trim().toUpperCase();
+      const parsedInstallments = Number(installments) || 1;
+      const existing = await prisma.cardFeeRate.findUnique({ where: { type: normalizedType } });
+
+      // Valor fixo em R$ somado na taxa (H7..H24) e no valor final (B7..B24)
+      const resolvedFixedFee =
+        fixedFee !== undefined
+          ? Number(fixedFee)
+          : existing?.fixedFee ??
+            (normalizedType === "CREDITO"
+              ? 5
+              : parsedInstallments >= 2 && parsedInstallments <= 12
+              ? 3 * parsedInstallments
+              : 0);
+
+      const resolvedExtraInstallmentFee =
+        extraInstallmentFee !== undefined
+          ? Number(extraInstallmentFee)
+          : fixedFee !== undefined
+          ? normalizedType === "CREDITO"
+            ? Number(fixedFee) === 5
+              ? 3
+              : Number(fixedFee)
+            : Number(fixedFee)
+          : existing?.extraInstallmentFee ??
+            (normalizedType === "CREDITO"
+              ? 3
+              : parsedInstallments >= 2 && parsedInstallments <= 12
+              ? 3 * parsedInstallments
+              : 0);
 
       const rate = await prisma.cardFeeRate.upsert({
         where: { type: normalizedType },
         update: {
-          installments: Number(installments),
+          installments: parsedInstallments,
           customerRate: Number(customerRate),
+          fixedFee: resolvedFixedFee,
+          extraInstallmentFee: resolvedExtraInstallmentFee,
           machineDiscountRate: Number(machineDiscountRate),
           active: Boolean(active)
         },
         create: {
           type: normalizedType,
-          installments: Number(installments),
+          installments: parsedInstallments,
           customerRate: Number(customerRate),
+          fixedFee: resolvedFixedFee,
+          extraInstallmentFee: resolvedExtraInstallmentFee,
           machineDiscountRate: Number(machineDiscountRate),
           active: Boolean(active)
         }
@@ -418,7 +611,7 @@ export const financialController = {
     }
   },
 
-  // Simulador idêntico à aba "TAXA" (informando VALOR VENDA e VALOR ENTRADA)
+  // Simulador idêntico à aba "TAXA" (informando VALOR VENDA e VALOR ENTRADA com taxas fixas + percentuais)
   async simulateCardFees(req: Request, res: Response): Promise<void> {
     try {
       const saleValue = Number(req.body.saleValue ?? req.query.saleValue ?? 0);
@@ -431,11 +624,21 @@ export const financialController = {
       });
 
       const table = rates.map((rate) => {
-        const addedFeeValue = Number((calculationBase * rate.customerRate).toFixed(2));
-        const finalCustomerValue = Number((calculationBase + addedFeeValue).toFixed(2));
+        // Na planilha original (aba TAXA):
+        // Coluna VALOR (H6:H24) = (VALOR CALCULO * %) + fixedFee (ex: +5 no Crédito 1x, +3*parcela em 2x..12x)
+        // Coluna VALOR FINAL (B6:B24) = VALOR CALCULO + Coluna VALOR (H) + extraInstallmentFee (ex: +3 no Crédito 1x, +3*parcela em 2x..12x)
+        // Coluna VALOR TAXA MAQUININHA (N6:N24) = VALOR CALCULO * machineDiscountRate
+        // Coluna RECEBER (K6:K24) = VALOR FINAL - VALOR TAXA MAQUININHA
+        const fixedFee = calculationBase > 0 ? rate.fixedFee : 0;
+        const extraInstallmentFee = calculationBase > 0 ? rate.extraInstallmentFee : 0;
+
+        const addedFeeValue = Number((calculationBase * rate.customerRate + fixedFee).toFixed(2));
+        const finalCustomerValue = Number(
+          (calculationBase + addedFeeValue + extraInstallmentFee).toFixed(2)
+        );
         const installmentValue = Number((finalCustomerValue / rate.installments).toFixed(2));
 
-        const machineFeeValue = Number((finalCustomerValue * rate.machineDiscountRate).toFixed(2));
+        const machineFeeValue = Number((calculationBase * rate.machineDiscountRate).toFixed(2));
         const netReceiveValue = Number((finalCustomerValue - machineFeeValue).toFixed(2));
 
         return {
@@ -443,6 +646,8 @@ export const financialController = {
           type: rate.type,
           installments: rate.installments,
           customerRate: rate.customerRate,
+          fixedFee: rate.fixedFee,
+          extraInstallmentFee: rate.extraInstallmentFee,
           addedFeeValue,
           finalCustomerValue,
           installmentValue,
