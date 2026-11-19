@@ -49,6 +49,8 @@ interface SimulationRow {
   type: string;
   installments: number;
   customerRate: number;
+  fixedFee: number;
+  extraInstallmentFee: number;
   addedFeeValue: number;
   finalCustomerValue: number;
   installmentValue: number;
@@ -65,6 +67,7 @@ interface SupplierOrderItemRecord {
   totalStoreCostUsd: number;
   totalCostWithPctUsd: number;
   costBrl: number;
+  totalCostWithExpensesBrl: number;
   unitCostBrl: number;
   unitSalePriceBrl: number;
   totalSalesBrl: number;
@@ -80,12 +83,34 @@ interface SupplierOrderRecord {
   orderDate: string;
   dollarRate: number;
   surchargeFactor: number;
+  secondarySurchargeFactor: number;
+  expensesBrl: number;
+  discount: number;
+  adjustments: number;
   previousBalance: number;
   totalOrderUsd: number;
   totalCostBrl: number;
   totalSalesBrl: number;
   totalProfitBrl: number;
   items: SupplierOrderItemRecord[];
+}
+
+interface SupplierTransactionRecord {
+  id: number;
+  supplierName: string;
+  orderId: number | null;
+  date: string;
+  type: "DEPOSITO" | "NOTA";
+  amount: number;
+  description: string | null;
+}
+
+interface SupplierTransactionsSummary {
+  supplierName: string;
+  previousBalance: number;
+  totalDepositos: number;
+  fechamentoNotas: number;
+  currentBalance: number;
 }
 
 interface WarrantyReceiptRecord {
@@ -142,18 +167,30 @@ export const FinanceiroPage: React.FC = () => {
   const [balanceValue, setBalanceValue] = useState("");
   const [swapValue, setSwapValue] = useState("");
 
-  // 3. Estado Aba TAXA (Simulador)
+  // 3. Estado Aba TAXA (Simulador + Edição de % e Valor Fixo R$)
   const [simSaleValue, setSimSaleValue] = useState("2900");
   const [simDownPayment, setSimDownPayment] = useState("0");
   const [simulations, setSimulations] = useState<SimulationRow[]>([]);
   const [simBase, setSimBase] = useState(2900);
+  const [editFeeType, setEditFeeType] = useState("CREDITO");
+  const [editFeeInstallments, setEditFeeInstallments] = useState("1");
+  const [editCustomerRatePct, setEditCustomerRatePct] = useState("3.31");
+  const [editFixedFeeBrl, setEditFixedFeeBrl] = useState("5");
+  const [editExtraInstallmentFeeBrl, setEditExtraInstallmentFeeBrl] = useState("3");
+  const [editMachineRatePct, setEditMachineRatePct] = useState("3.31");
 
-  // 4. Estado Aba Paraguai (Fornecedores)
+  // 4. Estado Aba Paraguai (Fornecedores + Depósitos/Notas JAPA)
   const [supplierOrders, setSupplierOrders] = useState<SupplierOrderRecord[]>([]);
+  const [supplierTransactions, setSupplierTransactions] = useState<SupplierTransactionRecord[]>([]);
+  const [supplierSummary, setSupplierSummary] = useState<SupplierTransactionsSummary | null>(null);
   const [selectedOrderTab, setSelectedOrderTab] = useState<string>("ALL");
   const [newOrderTabName, setNewOrderTabName] = useState("Paraguai Novo Lote");
   const [newOrderDollar, setNewOrderDollar] = useState("5.47");
   const [newOrderSurcharge, setNewOrderSurcharge] = useState("1.0");
+  const [newOrderSecondarySurcharge, setNewOrderSecondarySurcharge] = useState("1.0");
+  const [newOrderExpensesBrl, setNewOrderExpensesBrl] = useState("0");
+  const [newOrderDiscountUsd, setNewOrderDiscountUsd] = useState("0");
+  const [newOrderAdjustmentsBrl, setNewOrderAdjustmentsBrl] = useState("0");
   const [newOrderItemName, setNewOrderItemName] = useState("");
   const [newOrderItemQty, setNewOrderItemQty] = useState("1");
   const [newOrderItemCostUsd, setNewOrderItemCostUsd] = useState("");
@@ -161,6 +198,10 @@ export const FinanceiroPage: React.FC = () => {
   const [draftSupplierItems, setDraftSupplierItems] = useState<
     { quantity: number; productName: string; storeCostUsd: number; unitSalePriceBrl: number }[]
   >([]);
+  const [txType, setTxType] = useState<"DEPOSITO" | "NOTA">("DEPOSITO");
+  const [txDate, setTxDate] = useState(toISODateInput());
+  const [txAmount, setTxAmount] = useState("");
+  const [txDescription, setTxDescription] = useState("");
 
   // 5. Estado Aba Garantia
   const [warranties, setWarranties] = useState<WarrantyReceiptRecord[]>([]);
@@ -181,7 +222,7 @@ export const FinanceiroPage: React.FC = () => {
     let active = true;
     async function loadFinancialData() {
       try {
-        const [entRes, accRes, simRes, supRes, warRes] = await Promise.all([
+        const [entRes, accRes, simRes, supRes, supTxRes, warRes] = await Promise.all([
           apiFetch<{ entries: DailyEntryRecord[]; totals: EntriesTotals }>(
             `/financial/entries?month=${entriesMonth}&year=${entriesYear}`
           ),
@@ -190,6 +231,10 @@ export const FinanceiroPage: React.FC = () => {
             `/financial/card-fees/simulate?saleValue=${simSaleValue}&downPayment=${simDownPayment}`
           ),
           apiFetch<SupplierOrderRecord[]>("/suppliers/orders"),
+          apiFetch<{
+            transactions: SupplierTransactionRecord[];
+            summary: SupplierTransactionsSummary;
+          }>("/suppliers/transactions"),
           apiFetch<WarrantyReceiptRecord[]>("/warranties")
         ]);
         if (!active) return;
@@ -202,6 +247,8 @@ export const FinanceiroPage: React.FC = () => {
         setSimulations(simRes.simulations);
         setSimBase(simRes.calculationBase);
         setSupplierOrders(supRes);
+        setSupplierTransactions(supTxRes.transactions);
+        setSupplierSummary(supTxRes.summary);
         setWarranties(warRes);
         if (!selectedWarranty && warRes.length > 0) {
           setSelectedWarranty(warRes[0]);
@@ -260,6 +307,35 @@ export const FinanceiroPage: React.FC = () => {
     }
   };
 
+  const handleSelectFeeForEdit = (row: SimulationRow) => {
+    setEditFeeType(row.type);
+    setEditFeeInstallments(String(row.installments));
+    setEditCustomerRatePct(String(Number((row.customerRate * 100).toFixed(4))));
+    setEditFixedFeeBrl(String(row.fixedFee ?? 0));
+    setEditExtraInstallmentFeeBrl(String(row.extraInstallmentFee ?? 0));
+    setEditMachineRatePct(String(Number((row.machineDiscountRate * 100).toFixed(4))));
+  };
+
+  const handleSaveCardFee = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await apiFetch("/financial/card-fees", {
+        method: "POST",
+        body: JSON.stringify({
+          type: editFeeType,
+          installments: Number(editFeeInstallments) || 1,
+          customerRate: Number((Number(editCustomerRatePct) / 100).toFixed(6)),
+          fixedFee: Number(editFixedFeeBrl) || 0,
+          extraInstallmentFee: Number(editExtraInstallmentFeeBrl) || 0,
+          machineDiscountRate: Number((Number(editMachineRatePct) / 100).toFixed(6))
+        })
+      });
+      triggerManualSync();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erro ao atualizar taxa.");
+    }
+  };
+
   const handleAddDraftSupplierItem = () => {
     if (!newOrderItemName || !newOrderItemCostUsd || !newOrderItemSaleBrl) return;
     setDraftSupplierItems((prev) => [
@@ -291,13 +367,52 @@ export const FinanceiroPage: React.FC = () => {
           supplierName: "JAPA",
           dollarRate: Number(newOrderDollar) || 5.47,
           surchargeFactor: Number(newOrderSurcharge) || 1.0,
+          secondarySurchargeFactor: Number(newOrderSecondarySurcharge) || 1.0,
+          expensesBrl: Number(newOrderExpensesBrl) || 0,
+          discount: Number(newOrderDiscountUsd) || 0,
+          adjustments: Number(newOrderAdjustmentsBrl) || 0,
           items: draftSupplierItems
         })
       });
       setDraftSupplierItems([]);
+      setNewOrderExpensesBrl("0");
+      setNewOrderDiscountUsd("0");
+      setNewOrderAdjustmentsBrl("0");
       triggerManualSync();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Erro ao criar pedido.");
+    }
+  };
+
+  const handleCreateSupplierTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!txAmount) return;
+    try {
+      await apiFetch("/suppliers/transactions", {
+        method: "POST",
+        body: JSON.stringify({
+          supplierName: "JAPA",
+          date: `${txDate}T12:00:00.000Z`,
+          type: txType,
+          amount: Number(txAmount) || 0,
+          description: txDescription
+        })
+      });
+      setTxAmount("");
+      setTxDescription("");
+      triggerManualSync();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erro ao registrar depósito/nota.");
+    }
+  };
+
+  const handleDeleteSupplierTransaction = async (id: number) => {
+    if (!window.confirm("Deseja remover este lançamento de depósito/nota do JAPA?")) return;
+    try {
+      await apiFetch(`/suppliers/transactions/${id}`, { method: "DELETE" });
+      triggerManualSync();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erro ao remover lançamento.");
     }
   };
 
@@ -819,6 +934,104 @@ export const FinanceiroPage: React.FC = () => {
               </div>
             </div>
 
+            {/* Editor de Taxas (% e Valores Fixos R$ da Aba TAXA) */}
+            <form
+              onSubmit={handleSaveCardFee}
+              className="bg-white border border-emerald-200 rounded-xl p-4 space-y-3 shadow-sm"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-xs font-bold uppercase text-emerald-900">
+                  Editar Taxa Percentual (%) & Acréscimos Fixos (R$) — Clique em uma linha da tabela ou escolha abaixo
+                </h4>
+                <span className="text-[11px] text-slate-500">
+                  Fórmula Planilha: Taxa (H) = Base * % + Taxa Fixa R$ | Valor Final (B) = Base + Taxa (H) + Extra Final R$
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Faixa / Tipo
+                  </label>
+                  <select
+                    value={editFeeType}
+                    onChange={(e) => {
+                      const found = simulations.find((s) => s.type === e.target.value);
+                      if (found) {
+                        handleSelectFeeForEdit(found);
+                      } else {
+                        setEditFeeType(e.target.value);
+                      }
+                    }}
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-bold bg-white"
+                  >
+                    {simulations.map((s) => (
+                      <option key={s.type} value={s.type}>
+                        {s.type} ({s.installments}x)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    % Juros Cliente
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={editCustomerRatePct}
+                    onChange={(e) => setEditCustomerRatePct(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Taxa Fixa Col. H (R$)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={editFixedFeeBrl}
+                    onChange={(e) => setEditFixedFeeBrl(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Extra Final Col. B (R$)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={editExtraInstallmentFeeBrl}
+                    onChange={(e) => setEditExtraInstallmentFeeBrl(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    % Taxa Maquininha
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={editMachineRatePct}
+                    onChange={(e) => setEditMachineRatePct(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-semibold"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
+                >
+                  Salvar Taxa ({editFeeType})
+                </button>
+              </div>
+            </form>
+
             <div
               tabIndex={0}
               role="region"
@@ -829,18 +1042,24 @@ export const FinanceiroPage: React.FC = () => {
                 <thead className="bg-emerald-900 text-white text-xs uppercase">
                   <tr>
                     <th className="py-3 px-4">Tipo / Parcela</th>
-                    <th className="py-3 px-3 text-right">Valor Final (Cliente)</th>
+                    <th className="py-3 px-3 text-right">Valor Final (Col. B)</th>
                     <th className="py-3 px-3 text-right">Valor da Parcela</th>
                     <th className="py-3 px-3 text-right">% Juros</th>
-                    <th className="py-3 px-3 text-right">Acréscimo (R$)</th>
-                    <th className="py-3 px-3 text-right bg-emerald-950">Receber (Líquido)</th>
+                    <th className="py-3 px-3 text-right">Fixo (R$)</th>
+                    <th className="py-3 px-3 text-right">Valor Taxa (Col. H)</th>
+                    <th className="py-3 px-3 text-right bg-emerald-950">Receber (Col. K)</th>
                     <th className="py-3 px-3 text-right">Taxa Maq. (%)</th>
-                    <th className="py-3 px-4 text-right">Desconto Maq. (R$)</th>
+                    <th className="py-3 px-4 text-right">Desconto Maq. (Col. N)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {simulations.map((row) => (
-                    <tr key={row.id} className="hover:bg-emerald-50/40">
+                    <tr
+                      key={row.id}
+                      onClick={() => handleSelectFeeForEdit(row)}
+                      className="hover:bg-emerald-50/60 cursor-pointer"
+                      title="Clique para editar esta faixa de taxa"
+                    >
                       <th className="py-2.5 px-4 font-bold text-slate-900">{row.type}</th>
                       <td className="py-2.5 px-3 text-right font-bold text-emerald-800">
                         {formatBRL(row.finalCustomerValue)}
@@ -851,7 +1070,12 @@ export const FinanceiroPage: React.FC = () => {
                       <td className="py-2.5 px-3 text-right text-slate-600">
                         {(row.customerRate * 100).toFixed(2)}%
                       </td>
-                      <td className="py-2.5 px-3 text-right text-slate-600">
+                      <td className="py-2.5 px-3 text-right text-slate-500">
+                        {row.fixedFee > 0 || row.extraInstallmentFee > 0
+                          ? `+${formatBRL(row.fixedFee)} / +${formatBRL(row.extraInstallmentFee)}`
+                          : "R$ 0,00"}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-semibold text-slate-700">
                         {formatBRL(row.addedFeeValue)}
                       </td>
                       <td className="py-2.5 px-3 text-right font-bold text-emerald-700 bg-emerald-50/50">
@@ -876,6 +1100,167 @@ export const FinanceiroPage: React.FC = () => {
         {/* ========================================================================== */}
         {activeTab === "PARAGUAI" && (
           <div className="p-5 space-y-6">
+            {/* Quadro de Fechamento do Fornecedor JAPA (SALDO ANTERIOR + DEPOSITOS - NOTAS) */}
+            <div className="bg-white border border-emerald-200 rounded-2xl p-5 shadow-sm space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-emerald-950 uppercase">
+                    Conta Corrente Fornecedor JAPA — Depósitos, Fechamento de Notas e Saldo
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Fórmula da Planilha: SALDO ATUAL = SALDO ANTERIOR (-29.174) + TOTAL DEPÓSITOS - FECHAMENTO DAS NOTAS
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                  <div className="text-[11px] font-bold uppercase text-slate-600">
+                    SALDO ANTERIOR
+                  </div>
+                  <div className="text-lg font-extrabold text-rose-700 mt-0.5">
+                    {formatBRL(supplierSummary?.previousBalance ?? -29174)}
+                  </div>
+                </div>
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5">
+                  <div className="text-[11px] font-bold uppercase text-emerald-800">
+                    TOTAL DEPÓSITOS (+)
+                  </div>
+                  <div className="text-lg font-extrabold text-emerald-700 mt-0.5">
+                    {formatBRL(supplierSummary?.totalDepositos ?? 0)}
+                  </div>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5">
+                  <div className="text-[11px] font-bold uppercase text-amber-900">
+                    FECHAMENTO NOTAS (-)
+                  </div>
+                  <div className="text-lg font-extrabold text-amber-800 mt-0.5">
+                    {formatBRL(supplierSummary?.fechamentoNotas ?? 0)}
+                  </div>
+                </div>
+                <div className="bg-emerald-900 text-white rounded-xl p-3.5">
+                  <div className="text-[11px] font-bold uppercase text-emerald-200">
+                    SALDO ATUAL JAPA
+                  </div>
+                  <div className="text-lg font-extrabold mt-0.5">
+                    {formatBRL(supplierSummary?.currentBalance ?? -29174)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Formulário para lançar Depósito ou Nota do JAPA */}
+              <form
+                onSubmit={handleCreateSupplierTransaction}
+                className="bg-emerald-50/50 border border-emerald-200 rounded-xl p-3.5 grid grid-cols-1 sm:grid-cols-5 gap-3 items-end"
+              >
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Tipo *</label>
+                  <select
+                    value={txType}
+                    onChange={(e) => setTxType(e.target.value as "DEPOSITO" | "NOTA")}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold bg-white"
+                  >
+                    <option value="DEPOSITO">DEPÓSITO (+)</option>
+                    <option value="NOTA">NOTA / FECHAMENTO (-)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Data *</label>
+                  <input
+                    type="date"
+                    required
+                    value={txDate}
+                    onChange={(e) => setTxDate(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Valor (R$) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={txAmount}
+                    onChange={(e) => setTxAmount(e.target.value)}
+                    placeholder="Ex: 15000"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Loja / Observação
+                  </label>
+                  <input
+                    type="text"
+                    value={txDescription}
+                    onChange={(e) => setTxDescription(e.target.value)}
+                    placeholder="Ex: Pix Japa / Nota Loja"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Lançar no Saldo</span>
+                </button>
+              </form>
+
+              {supplierTransactions.length > 0 && (
+                <div className="table-wrapper border border-slate-200 rounded-xl">
+                  <table className="text-left text-xs">
+                    <thead className="bg-slate-100 text-slate-700 uppercase">
+                      <tr>
+                        <th className="py-2 px-4">Tipo</th>
+                        <th className="py-2 px-3">Data</th>
+                        <th className="py-2 px-4">Loja / Observação</th>
+                        <th className="py-2 px-3 text-right">Valor</th>
+                        <th className="py-2 px-3 text-center">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {supplierTransactions.map((tx) => (
+                        <tr key={tx.id} className="hover:bg-emerald-50/30">
+                          <th className="py-2 px-4">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                tx.type === "DEPOSITO"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : "bg-amber-100 text-amber-900"
+                              }`}
+                            >
+                              {tx.type}
+                            </span>
+                          </th>
+                          <td className="py-2 px-3 text-slate-600">{formatDateBR(tx.date)}</td>
+                          <td className="py-2 px-4 text-slate-700">{tx.description || "-"}</td>
+                          <td
+                            className={`py-2 px-3 text-right font-bold ${
+                              tx.type === "DEPOSITO" ? "text-emerald-700" : "text-rose-700"
+                            }`}
+                          >
+                            {formatBRL(tx.amount)}
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSupplierTransaction(tx.id)}
+                              className="p-1 rounded hover:bg-rose-100 text-rose-600 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <button
@@ -918,13 +1303,31 @@ export const FinanceiroPage: React.FC = () => {
                     </span>
                     <h4 className="text-base font-bold">{order.tabName}</h4>
                   </div>
-                  <div className="flex flex-wrap items-center gap-4 text-xs">
+                  <div className="flex flex-wrap items-center gap-3 text-xs">
                     <div>
-                      Cotação Dólar: <strong>R$ {order.dollarRate}</strong>
+                      Dólar: <strong>R$ {order.dollarRate}</strong>
                     </div>
                     <div>
-                      Porcentagem: <strong>{order.surchargeFactor}</strong>
+                      1ª %: <strong>{order.surchargeFactor}</strong>
                     </div>
+                    <div>
+                      2ª %: <strong>{order.secondarySurchargeFactor ?? order.surchargeFactor}</strong>
+                    </div>
+                    {order.expensesBrl > 0 && (
+                      <div>
+                        Despesas (AB16): <strong>{formatBRL(order.expensesBrl)}</strong>
+                      </div>
+                    )}
+                    {order.discount > 0 && (
+                      <div>
+                        Desconto ($): <strong>{formatUSD(order.discount)}</strong>
+                      </div>
+                    )}
+                    {order.adjustments !== 0 && (
+                      <div>
+                        Ajustes (R$): <strong>{formatBRL(order.adjustments)}</strong>
+                      </div>
+                    )}
                     <div>
                       Total Pedido ($): <strong>{formatUSD(order.totalOrderUsd)}</strong>
                     </div>
@@ -953,7 +1356,8 @@ export const FinanceiroPage: React.FC = () => {
                         <th className="py-2.5 px-2 text-center">Qtd</th>
                         <th className="py-2.5 px-3 text-right">Custo Loja ($)</th>
                         <th className="py-2.5 px-3 text-right">Custo Total % ($)</th>
-                        <th className="py-2.5 px-3 text-right">Custo Reais (R$)</th>
+                        <th className="py-2.5 px-3 text-right">Custo Reais (Col. M)</th>
+                        <th className="py-2.5 px-3 text-right">Custo Total (Col. O)</th>
                         <th className="py-2.5 px-3 text-right">Custo Unit. (R$)</th>
                         <th className="py-2.5 px-3 text-right">Venda Unit. (R$)</th>
                         <th className="py-2.5 px-3 text-right">Total Vendas (R$)</th>
@@ -971,6 +1375,9 @@ export const FinanceiroPage: React.FC = () => {
                             {formatUSD(item.totalCostWithPctUsd)}
                           </td>
                           <td className="py-2 px-3 text-right">{formatBRL(item.costBrl)}</td>
+                          <td className="py-2 px-3 text-right font-semibold text-emerald-900">
+                            {formatBRL(item.totalCostWithExpensesBrl || item.costBrl)}
+                          </td>
                           <td className="py-2 px-3 text-right font-semibold">
                             {formatBRL(item.unitCostBrl)}
                           </td>
@@ -1003,8 +1410,8 @@ export const FinanceiroPage: React.FC = () => {
                 Cadastrar Novo Pedido / Lote Paraguai (JAPA)
               </h4>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+                <div className="lg:col-span-2">
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Nome da Aba / Lote
                   </label>
@@ -1031,7 +1438,7 @@ export const FinanceiroPage: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Fator Porcentagem (1.0 = sem taxa, 1.15 = +15%)
+                    1ª Porcentagem
                   </label>
                   <input
                     type="number"
@@ -1041,6 +1448,56 @@ export const FinanceiroPage: React.FC = () => {
                     onChange={(e) => setNewOrderSurcharge(e.target.value)}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
                   />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    2ª Porcentagem (AB20)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={newOrderSecondarySurcharge}
+                    onChange={(e) => setNewOrderSecondarySurcharge(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Despesas Rateio (R$ AB16)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={newOrderExpensesBrl}
+                    onChange={(e) => setNewOrderExpensesBrl(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Desc. (US$)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={newOrderDiscountUsd}
+                      onChange={(e) => setNewOrderDiscountUsd(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-2 py-2 text-xs bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Ajustes (R$)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={newOrderAdjustmentsBrl}
+                      onChange={(e) => setNewOrderAdjustmentsBrl(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-2 py-2 text-xs bg-white"
+                    />
+                  </div>
                 </div>
               </div>
 

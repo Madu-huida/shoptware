@@ -27,7 +27,24 @@ interface ExpenseSummary {
   grandTotal: number;
   byModule: Record<string, number>;
   byCategory: Record<string, number>;
+  bigMonthlyTotals?: Record<number, number>;
+  year?: number;
 }
+
+const MONTH_NAMES_FULL = [
+  { month: 1, name: "JANEIRO" },
+  { month: 2, name: "FEVEREIRO" },
+  { month: 3, name: "MARÇO" },
+  { month: 4, name: "ABRIL" },
+  { month: 5, name: "MAIO" },
+  { month: 6, name: "JUNHO" },
+  { month: 7, name: "JULHO" },
+  { month: 8, name: "AGOSTO" },
+  { month: 9, name: "SETEMBRO" },
+  { month: 10, name: "OUTUBRO" },
+  { month: 11, name: "NOVEMBRO" },
+  { month: 12, name: "DEZEMBRO" }
+];
 
 interface PayableBillRecord {
   id: number;
@@ -91,6 +108,7 @@ const BILL_CATEGORIES = [
 export const DespesasPage: React.FC = () => {
   const { syncVersion, triggerManualSync } = useRealtime();
   const [activeTab, setActiveTab] = useState<ExpenseTab>("GERAL");
+  const [selectedYear, setSelectedYear] = useState<string>("2026");
   const [categoriesMap, setCategoriesMap] = useState<Record<string, string[]>>({});
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [expenseSummary, setExpenseSummary] = useState<ExpenseSummary | null>(null);
@@ -116,7 +134,9 @@ export const DespesasPage: React.FC = () => {
       try {
         const [cats, expRes, billsRes] = await Promise.all([
           apiFetch<Record<string, string[]>>("/expenses/categories"),
-          apiFetch<{ expenses: ExpenseRecord[]; summary: ExpenseSummary }>("/expenses"),
+          apiFetch<{ expenses: ExpenseRecord[]; summary: ExpenseSummary }>(
+            `/expenses?year=${selectedYear}`
+          ),
           apiFetch<{ bills: PayableBillRecord[]; summary: BillsSummary }>("/bills")
         ]);
         if (!active) return;
@@ -133,7 +153,7 @@ export const DespesasPage: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [syncVersion]);
+  }, [selectedYear, syncVersion]);
 
   useEffect(() => {
     if (activeTab !== "CONTAS") {
@@ -249,6 +269,16 @@ export const DespesasPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          <select
+            value={selectedYear}
+            onChange={(e) => setSelectedYear(e.target.value)}
+            aria-label="Ano de referência das despesas"
+            className="border border-emerald-300 rounded-lg px-2.5 py-1.5 font-bold bg-white text-slate-900"
+          >
+            <option value="2025">Ano 2025</option>
+            <option value="2026">Ano 2026</option>
+            <option value="2027">Ano 2027</option>
+          </select>
           <div className="bg-slate-100 px-3 py-1.5 rounded-lg">
             Gastos Geral: <strong>{formatBRL(expenseSummary?.byModule["GERAL"])}</strong>
           </div>
@@ -458,6 +488,58 @@ export const DespesasPage: React.FC = () => {
                 </div>
               )}
 
+              {/* Quadro Resumo TOTAIS MENSAL (Jan–Dez) exclusivo da Aba Gastos BIG */}
+              {activeTab === "BIG" && (
+                <div className="bg-white border border-emerald-200 rounded-2xl p-4 shadow-sm space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                    <div>
+                      <h4 className="text-xs font-extrabold uppercase tracking-wider text-emerald-900">
+                        TOTAIS MENSAL — Evolução Anual Gastos BIG (Janeiro a Dezembro / {selectedYear})
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Replica a tabela lateral TOTAIS MENSAL (Z4:AC16) da aba Gastos BIG na planilha
+                      </p>
+                    </div>
+                    <div className="text-xs font-extrabold text-emerald-800 bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-200">
+                      Acumulado Anual:{" "}
+                      {formatBRL(
+                        Object.values(expenseSummary?.bigMonthlyTotals || {}).reduce(
+                          (acc, val) => acc + val,
+                          0
+                        )
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+                    {MONTH_NAMES_FULL.map((m) => {
+                      const monthVal = expenseSummary?.bigMonthlyTotals?.[m.month] || 0;
+                      return (
+                        <div
+                          key={m.month}
+                          className={`rounded-xl p-3 border text-xs ${
+                            monthVal > 0
+                              ? "bg-emerald-50/70 border-emerald-200"
+                              : "bg-slate-50 border-slate-200 text-slate-400"
+                          }`}
+                        >
+                          <div className="text-[10px] font-bold uppercase text-slate-600">
+                            {m.name}
+                          </div>
+                          <div
+                            className={`text-sm font-extrabold mt-0.5 ${
+                              monthVal > 0 ? "text-emerald-900" : "text-slate-400"
+                            }`}
+                          >
+                            {monthVal > 0 ? formatBRL(monthVal) : "-"}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Tabela de Lançamentos */}
               <div
                 tabIndex={0}
@@ -492,13 +574,19 @@ export const DespesasPage: React.FC = () => {
                             {formatBRL(exp.amount)}
                           </td>
                           <td className="py-2.5 px-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteExpense(exp.id)}
-                              className="p-1.5 rounded hover:bg-rose-100 text-rose-600 cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {exp.id > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteExpense(exp.id)}
+                                className="p-1.5 rounded hover:bg-rose-100 text-rose-600 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            ) : (
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                                Auto (Cartão)
+                              </span>
+                            )}
                           </td>
                         </tr>
                       ))

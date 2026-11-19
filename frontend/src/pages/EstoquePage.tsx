@@ -9,7 +9,8 @@ import {
   Search,
   Lock,
   Check,
-  X
+  X,
+  Wrench
 } from "lucide-react";
 import { apiFetch, formatBRL, formatDateBR, formatUSD, toISODateInput } from "../lib/api";
 import { useRealtime } from "../context/RealtimeContext";
@@ -23,6 +24,7 @@ export interface ProductRecord {
   lote3: number;
   quantity: number;
   inAssistance: number;
+  assistanceNotes?: string | null;
   salePrice: number;
   costPrice: number;
   costDollar: number | null;
@@ -33,6 +35,7 @@ export interface ProductRecord {
 interface StockSummary {
   totalQuantity: number;
   totalCellphones: number;
+  totalPieces?: number;
   totalLote1: number;
   totalLote2: number;
   totalLote3: number;
@@ -70,10 +73,12 @@ export const EstoquePage: React.FC = () => {
   const [formLote2, setFormLote2] = useState("1");
   const [formLote3, setFormLote3] = useState("0");
   const [formAssistance, setFormAssistance] = useState("0");
+  const [formAssistanceNotes, setFormAssistanceNotes] = useState("");
   const [formSalePrice, setFormSalePrice] = useState("");
   const [formCostPrice, setFormCostPrice] = useState("");
   const [formCostDollar, setFormCostDollar] = useState("");
   const [formDollarRate, setFormDollarRate] = useState("5.5");
+  const [showAssistancePanel, setShowAssistancePanel] = useState(false);
 
   // Estado de Conferência Física
   const [checkDate, setCheckDate] = useState(toISODateInput());
@@ -110,6 +115,7 @@ export const EstoquePage: React.FC = () => {
     setFormLote2("1");
     setFormLote3("0");
     setFormAssistance("0");
+    setFormAssistanceNotes("");
     setFormSalePrice("");
     setFormCostPrice("");
     setFormCostDollar("");
@@ -126,6 +132,7 @@ export const EstoquePage: React.FC = () => {
     setFormLote2(String(p.lote2));
     setFormLote3(String(p.lote3));
     setFormAssistance(String(p.inAssistance));
+    setFormAssistanceNotes(p.assistanceNotes || "");
     setFormSalePrice(String(p.salePrice));
     setFormCostPrice(String(p.costPrice));
     setFormCostDollar(p.costDollar !== null ? String(p.costDollar) : "");
@@ -164,6 +171,7 @@ export const EstoquePage: React.FC = () => {
         lote3: l3,
         quantity: qty,
         inAssistance: Number(formAssistance) || 0,
+        assistanceNotes: formAssistanceNotes.trim() || null,
         salePrice: Number(formSalePrice) || 0,
         costPrice: computedCostBrl,
         costDollar: costUsd,
@@ -257,11 +265,16 @@ export const EstoquePage: React.FC = () => {
     (acc, item) => {
       acc.qty += item.quantity;
       acc.cells += item.category === "CELULAR" ? item.quantity : 0;
+      acc.pieces += item.category === "PECA" ? item.quantity : 0;
       acc.sales += item.quantity * item.salePrice;
       acc.cost += item.quantity * item.costPrice;
       return acc;
     },
-    { qty: 0, cells: 0, sales: 0, cost: 0 }
+    { qty: 0, cells: 0, pieces: 0, sales: 0, cost: 0 }
+  );
+
+  const assistanceProducts = products.filter(
+    (p) => p.inAssistance > 0 || (p.assistanceNotes && p.assistanceNotes.trim().length > 0)
   );
 
   const perfumeSummary = perfumeProducts.reduce(
@@ -365,6 +378,7 @@ export const EstoquePage: React.FC = () => {
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
               >
                 <option value="CELULAR">Celular / Smartphone</option>
+                <option value="PECA">Peça (Categoria PEÇAS)</option>
                 <option value="ACESSORIO">Acessório / Eletrônico</option>
                 <option value="PERFUME_FEMININO">Perfume Feminino</option>
                 <option value="PERFUME_UNISSEX">Perfume Unissex</option>
@@ -427,6 +441,19 @@ export const EstoquePage: React.FC = () => {
                 value={formAssistance}
                 onChange={(e) => setFormAssistance(e.target.value)}
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-semibold text-amber-900 mb-1">
+                Observação de Assistência Técnica (Aparelho / Cliente / Defeito)
+              </label>
+              <input
+                type="text"
+                value={formAssistanceNotes}
+                onChange={(e) => setFormAssistanceNotes(e.target.value)}
+                placeholder="Ex: Tela trocada - Cliente Marcos (47 99999-0000)"
+                className="w-full border border-amber-300 bg-amber-50/40 rounded-lg px-3 py-2 text-sm"
               />
             </div>
 
@@ -562,8 +589,8 @@ export const EstoquePage: React.FC = () => {
         {/* Painel 1: Estoque Geral */}
         {activeTab === "ESTOQUE" && (
           <div className="p-5 space-y-5">
-            {/* Cards de Resumo da Aba Estoque */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {/* Cards de Resumo da Aba Estoque (Replicando TOTAL CELULAR, TOTAL PEÇAS Q14:S14 e ASSISTENCIA) */}
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5">
                 <div className="text-[11px] font-bold uppercase text-emerald-800">
                   TOTAL VENDAS (ESTOQUE)
@@ -582,10 +609,18 @@ export const EstoquePage: React.FC = () => {
               </div>
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
                 <div className="text-[11px] font-bold uppercase text-slate-600">
-                  TOTAL GERAL PEÇAS
+                  TOTAL PEÇAS (Q14:S14)
                 </div>
                 <div className="text-lg font-extrabold text-slate-900 mt-0.5">
-                  {generalSummary.qty} peças
+                  {summary?.totalPieces ?? generalSummary.pieces} peças
+                </div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                <div className="text-[11px] font-bold uppercase text-slate-600">
+                  TOTAL GERAL ESTOQUE
+                </div>
+                <div className="text-lg font-extrabold text-slate-900 mt-0.5">
+                  {generalSummary.qty} un.
                 </div>
               </div>
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
@@ -596,13 +631,80 @@ export const EstoquePage: React.FC = () => {
                   {formatBRL(generalSummary.sales - generalSummary.cost)}
                 </div>
               </div>
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5">
-                <div className="text-[11px] font-bold uppercase text-amber-800">ASSISTÊNCIA</div>
+              <button
+                type="button"
+                onClick={() => setShowAssistancePanel((prev) => !prev)}
+                className="text-left bg-amber-50 hover:bg-amber-100/80 border border-amber-300 rounded-xl p-3.5 transition cursor-pointer"
+              >
+                <div className="flex items-center justify-between text-[11px] font-bold uppercase text-amber-800">
+                  <span>ASSISTÊNCIA</span>
+                  <Wrench className="w-3.5 h-3.5" />
+                </div>
                 <div className="text-lg font-extrabold text-amber-900 mt-0.5">
                   {summary?.totalInAssistance ?? 0} un.
                 </div>
-              </div>
+                <div className="text-[10px] text-amber-800 underline mt-0.5">
+                  {showAssistancePanel ? "Ocultar detalhes" : "Ver aparelhos/clientes"}
+                </div>
+              </button>
             </div>
+
+            {/* Painel de Detalhamento de Assistência Técnica */}
+            {showAssistancePanel && (
+              <div className="bg-amber-50/70 border border-amber-300 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-amber-950 font-bold text-xs uppercase">
+                    <Wrench className="w-4 h-4 text-amber-700" />
+                    <span>
+                      Controle de Aparelhos em Assistência Técnica ({assistanceProducts.length} registros)
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAssistancePanel(false)}
+                    className="text-xs font-bold text-amber-900 hover:underline cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                </div>
+
+                {assistanceProducts.length === 0 ? (
+                  <p className="text-xs text-amber-800">
+                    Nenhum produto com unidades ou observações em assistência no momento. Para registrar, clique em editar (<Edit3 className="w-3 h-3 inline" />) no produto desejado e informe a quantidade/observação de assistência.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    {assistanceProducts.map((ap) => (
+                      <div
+                        key={ap.id}
+                        className="bg-white border border-amber-200 rounded-xl p-3 flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div>
+                          <div className="font-bold text-slate-900">
+                            {ap.name}{" "}
+                            <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-extrabold">
+                              {ap.inAssistance} un. em assistência
+                            </span>
+                          </div>
+                          <div className="text-slate-600 mt-1">
+                            Obs: <strong>{ap.assistanceNotes || "Sem observação detalhada"}</strong>
+                          </div>
+                        </div>
+                        {isPc && (
+                          <button
+                            type="button"
+                            onClick={() => openEditProductForm(ap)}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold shrink-0 cursor-pointer"
+                          >
+                            Editar Obs.
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Busca e Filtro */}
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -612,7 +714,7 @@ export const EstoquePage: React.FC = () => {
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Buscar celular, câmera, fone, Fire Stick, JBL..."
+                  placeholder="Buscar celular, peça, câmera, fone, Fire Stick, JBL..."
                   className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm"
                 />
               </div>
@@ -625,6 +727,7 @@ export const EstoquePage: React.FC = () => {
                 >
                   <option value="ALL">Todas as Categorias</option>
                   <option value="CELULAR">Apenas Celulares</option>
+                  <option value="PECA">Apenas Peças (TOTAL PEÇAS)</option>
                   <option value="ACESSORIO">Apenas Acessórios / Câmeras / JBL</option>
                 </select>
               </div>
@@ -670,6 +773,15 @@ export const EstoquePage: React.FC = () => {
                             <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">
                               {p.category}
                             </span>
+                            {(p.inAssistance > 0 || p.assistanceNotes) && (
+                              <span
+                                title={p.assistanceNotes || "Em assistência técnica"}
+                                className="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold"
+                              >
+                                Assistência: {p.inAssistance}
+                                {p.assistanceNotes ? ` (${p.assistanceNotes})` : ""}
+                              </span>
+                            )}
                           </div>
                         </th>
                         <td className="py-2.5 px-2 text-center">{p.lote1 || ""}</td>
