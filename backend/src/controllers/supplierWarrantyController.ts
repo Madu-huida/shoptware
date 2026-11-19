@@ -12,14 +12,16 @@ interface RawSupplierItemInput {
 function buildSupplierOrderItems(
   items: RawSupplierItemInput[],
   dollarRate: number,
-  surchargeFactor: number
+  surchargeFactor: number,
+  expensesBrl = 0,
+  discountUsd = 0,
+  adjustmentsBrl = 0
 ) {
-  let totalOrderUsd = 0;
-  let totalCostBrl = 0;
-  let totalSalesBrl = 0;
-  let totalProfitBrl = 0;
+  let rawOrderUsd = 0;
+  let rawItemsCostBrl = 0;
 
-  const processedItems = items.map((item) => {
+  // 1ª Passada: Calcula CUSTO TOTAL LOJA (I), CUSTO TOTAL % (K) e CUSTO REAIS (M)
+  const stageOne = items.map((item) => {
     const qty = Number(item.quantity) || 1;
     const storeCostUsd = Number(item.storeCostUsd) || 0;
     const unitSalePriceBrl = Number(item.unitSalePriceBrl) || 0;
@@ -27,33 +29,64 @@ function buildSupplierOrderItems(
     const totalStoreCostUsd = Number((qty * storeCostUsd).toFixed(2));
     const totalCostWithPctUsd = Number((totalStoreCostUsd * surchargeFactor).toFixed(2));
     const costBrl = Number((totalCostWithPctUsd * dollarRate).toFixed(2));
-    const unitCostBrl = Number((costBrl / qty).toFixed(2));
-    const itemTotalSalesBrl = Number((qty * unitSalePriceBrl).toFixed(2));
-    const itemTotalProfitBrl = Number((itemTotalSalesBrl - costBrl).toFixed(2));
-    const unitProfitBrl = Number((itemTotalProfitBrl / qty).toFixed(2));
-    const marginPercent =
-      costBrl > 0 ? Number((itemTotalProfitBrl / costBrl).toFixed(4)) : 0;
 
-    totalOrderUsd = Number((totalOrderUsd + totalStoreCostUsd).toFixed(2));
-    totalCostBrl = Number((totalCostBrl + costBrl).toFixed(2));
-    totalSalesBrl = Number((totalSalesBrl + itemTotalSalesBrl).toFixed(2));
-    totalProfitBrl = Number((totalProfitBrl + itemTotalProfitBrl).toFixed(2));
+    rawOrderUsd = Number((rawOrderUsd + totalStoreCostUsd).toFixed(2));
+    rawItemsCostBrl = Number((rawItemsCostBrl + costBrl).toFixed(2));
 
     return {
-      quantity: qty,
+      qty,
       productName: String(item.productName).trim(),
       storeCostUsd,
+      unitSalePriceBrl,
       totalStoreCostUsd,
       totalCostWithPctUsd,
-      costBrl,
+      costBrl
+    };
+  });
+
+  // 2ª Passada: Aplica rateio de despesas do pedido (AB16): O9 = (M9 * (expensesBrl / totalCostBrl)) + M9
+  let totalSalesBrl = 0;
+  const processedItems = stageOne.map((row) => {
+    const totalCostWithExpensesBrl =
+      rawItemsCostBrl > 0 && expensesBrl > 0
+        ? Number(((row.costBrl * (expensesBrl / rawItemsCostBrl)) + row.costBrl).toFixed(2))
+        : row.costBrl;
+
+    const unitCostBrl = Number((totalCostWithExpensesBrl / row.qty).toFixed(2));
+    const itemTotalSalesBrl = Number((row.qty * row.unitSalePriceBrl).toFixed(2));
+    const itemTotalProfitBrl = Number((itemTotalSalesBrl - totalCostWithExpensesBrl).toFixed(2));
+    const unitProfitBrl = Number((itemTotalProfitBrl / row.qty).toFixed(2));
+    const marginPercent =
+      totalCostWithExpensesBrl > 0
+        ? Number((itemTotalProfitBrl / totalCostWithExpensesBrl).toFixed(4))
+        : 0;
+
+    totalSalesBrl = Number((totalSalesBrl + itemTotalSalesBrl).toFixed(2));
+
+    return {
+      quantity: row.qty,
+      productName: row.productName,
+      storeCostUsd: row.storeCostUsd,
+      totalStoreCostUsd: row.totalStoreCostUsd,
+      totalCostWithPctUsd: row.totalCostWithPctUsd,
+      costBrl: row.costBrl,
+      totalCostWithExpensesBrl,
       unitCostBrl,
-      unitSalePriceBrl,
+      unitSalePriceBrl: row.unitSalePriceBrl,
       totalSalesBrl: itemTotalSalesBrl,
       totalProfitBrl: itemTotalProfitBrl,
       unitProfitBrl,
       marginPercent
     };
   });
+
+  // Aplica discount (US$) e adjustments (R$) nos totais do pedido
+  const totalOrderUsd = Number(Math.max(0, rawOrderUsd - discountUsd).toFixed(2));
+  const discountBrl = Number((discountUsd * surchargeFactor * dollarRate).toFixed(2));
+  const totalCostBrl = Number(
+    Math.max(0, rawItemsCostBrl + expensesBrl - discountBrl + adjustmentsBrl).toFixed(2)
+  );
+  const totalProfitBrl = Number((totalSalesBrl - totalCostBrl).toFixed(2));
 
   return {
     processedItems,
@@ -76,7 +109,7 @@ export const supplierWarrantyController = {
       const { tabName } = req.query;
       const orders = await prisma.supplierOrder.findMany({
         where: tabName ? { tabName: String(tabName) } : undefined,
-        include: { items: true },
+        include: { items: true, transactions: true },
         orderBy: [{ orderDate: "desc" }, { id: "desc" }]
       });
       res.json(orders);
@@ -94,6 +127,8 @@ export const supplierWarrantyController = {
         orderDate,
         dollarRate = 5.47,
         surchargeFactor = 1.0,
+        secondarySurchargeFactor,
+        expensesBrl = 0,
         discount = 0,
         adjustments = 0,
         previousBalance = -29174,
@@ -103,11 +138,19 @@ export const supplierWarrantyController = {
 
       const parsedDollar = Number(dollarRate) || 5.47;
       const parsedSurcharge = Number(surchargeFactor) || 1.0;
+      const parsedSecondarySurcharge =
+        secondarySurchargeFactor !== undefined ? Number(secondarySurchargeFactor) : parsedSurcharge;
+      const parsedExpensesBrl = Number(expensesBrl) || 0;
+      const parsedDiscountUsd = Number(discount) || 0;
+      const parsedAdjustmentsBrl = Number(adjustments) || 0;
 
       const { processedItems, totals } = buildSupplierOrderItems(
         Array.isArray(items) ? items : [],
         parsedDollar,
-        parsedSurcharge
+        parsedSurcharge,
+        parsedExpensesBrl,
+        parsedDiscountUsd,
+        parsedAdjustmentsBrl
       );
 
       const order = await prisma.supplierOrder.create({
@@ -117,9 +160,11 @@ export const supplierWarrantyController = {
           orderDate: orderDate ? new Date(orderDate) : new Date(),
           dollarRate: parsedDollar,
           surchargeFactor: parsedSurcharge,
-          discount: Number(discount) || 0,
-          adjustments: Number(adjustments) || 0,
-          previousBalance: Number(previousBalance) || 0,
+          secondarySurchargeFactor: parsedSecondarySurcharge,
+          expensesBrl: parsedExpensesBrl,
+          discount: parsedDiscountUsd,
+          adjustments: parsedAdjustmentsBrl,
+          previousBalance: Number(previousBalance) ?? -29174,
           totalOrderUsd: totals.totalOrderUsd,
           totalCostBrl: totals.totalCostBrl,
           totalSalesBrl: totals.totalSalesBrl,
@@ -129,7 +174,7 @@ export const supplierWarrantyController = {
             create: processedItems
           }
         },
-        include: { items: true }
+        include: { items: true, transactions: true }
       });
 
       emitRealtimeEvent("supplier:updated", { action: "created", order });
@@ -159,6 +204,8 @@ export const supplierWarrantyController = {
         orderDate,
         dollarRate,
         surchargeFactor,
+        secondarySurchargeFactor,
+        expensesBrl,
         discount,
         adjustments,
         previousBalance,
@@ -169,6 +216,15 @@ export const supplierWarrantyController = {
       const nextDollar = dollarRate !== undefined ? Number(dollarRate) : existing.dollarRate;
       const nextSurcharge =
         surchargeFactor !== undefined ? Number(surchargeFactor) : existing.surchargeFactor;
+      const nextSecondarySurcharge =
+        secondarySurchargeFactor !== undefined
+          ? Number(secondarySurchargeFactor)
+          : existing.secondarySurchargeFactor;
+      const nextExpensesBrl =
+        expensesBrl !== undefined ? Number(expensesBrl) : existing.expensesBrl;
+      const nextDiscount = discount !== undefined ? Number(discount) : existing.discount;
+      const nextAdjustments =
+        adjustments !== undefined ? Number(adjustments) : existing.adjustments;
 
       const sourceItems: RawSupplierItemInput[] = Array.isArray(items)
         ? items
@@ -182,7 +238,10 @@ export const supplierWarrantyController = {
       const { processedItems, totals } = buildSupplierOrderItems(
         sourceItems,
         nextDollar,
-        nextSurcharge
+        nextSurcharge,
+        nextExpensesBrl,
+        nextDiscount,
+        nextAdjustments
       );
 
       const updated = await prisma.$transaction(async (tx) => {
@@ -197,8 +256,10 @@ export const supplierWarrantyController = {
             orderDate: orderDate ? new Date(orderDate) : existing.orderDate,
             dollarRate: nextDollar,
             surchargeFactor: nextSurcharge,
-            discount: discount !== undefined ? Number(discount) : existing.discount,
-            adjustments: adjustments !== undefined ? Number(adjustments) : existing.adjustments,
+            secondarySurchargeFactor: nextSecondarySurcharge,
+            expensesBrl: nextExpensesBrl,
+            discount: nextDiscount,
+            adjustments: nextAdjustments,
             previousBalance:
               previousBalance !== undefined ? Number(previousBalance) : existing.previousBalance,
             totalOrderUsd: totals.totalOrderUsd,
@@ -210,7 +271,7 @@ export const supplierWarrantyController = {
               create: processedItems
             }
           },
-          include: { items: true }
+          include: { items: true, transactions: true }
         });
       });
 
@@ -231,6 +292,112 @@ export const supplierWarrantyController = {
     } catch (error) {
       console.error("Erro ao remover pedido de fornecedor:", error);
       res.status(500).json({ error: "Erro ao remover pedido de fornecedor." });
+    }
+  },
+
+  // ============================================================================
+  // DEPOSITOS E NOTAS DO FORNECEDOR (JAPA) — Cálculo Dinâmico do SALDO
+  // SALDO = saldoAnterior + totalDepositos - fechamentoNotas (iniciando em -29174)
+  // ============================================================================
+
+  async listSupplierTransactions(req: Request, res: Response): Promise<void> {
+    try {
+      const { supplierName = "JAPA", orderId } = req.query;
+      const normalizedSupplier = String(supplierName).trim().toUpperCase();
+
+      const where: Record<string, unknown> = { supplierName: normalizedSupplier };
+      if (orderId) {
+        where.orderId = Number(orderId);
+      }
+
+      const [transactions, latestOrder] = await Promise.all([
+        prisma.supplierTransaction.findMany({
+          where,
+          orderBy: [{ date: "desc" }, { id: "desc" }]
+        }),
+        prisma.supplierOrder.findFirst({
+          where: { supplierName: normalizedSupplier },
+          orderBy: { id: "desc" }
+        })
+      ]);
+
+      const previousBalance = latestOrder?.previousBalance ?? -29174;
+      let totalDepositos = 0;
+      let fechamentoNotas = 0;
+
+      for (const t of transactions) {
+        if (t.type === "DEPOSITO") {
+          totalDepositos = Number((totalDepositos + t.amount).toFixed(2));
+        } else if (t.type === "NOTA") {
+          fechamentoNotas = Number((fechamentoNotas + t.amount).toFixed(2));
+        }
+      }
+
+      const currentBalance = Number(
+        (previousBalance + totalDepositos - fechamentoNotas).toFixed(2)
+      );
+
+      res.json({
+        transactions,
+        summary: {
+          supplierName: normalizedSupplier,
+          previousBalance,
+          totalDepositos,
+          fechamentoNotas,
+          currentBalance
+        }
+      });
+    } catch (error) {
+      console.error("Erro ao listar depósitos e notas do fornecedor:", error);
+      res.status(500).json({ error: "Erro ao listar depósitos e notas do fornecedor." });
+    }
+  },
+
+  async createSupplierTransaction(req: Request, res: Response): Promise<void> {
+    try {
+      const {
+        supplierName = "JAPA",
+        orderId,
+        date,
+        type = "DEPOSITO",
+        amount,
+        description
+      } = req.body;
+
+      const normalizedType = String(type).trim().toUpperCase();
+      if (!["DEPOSITO", "NOTA"].includes(normalizedType) || amount === undefined) {
+        res.status(400).json({ error: "Tipo (DEPOSITO ou NOTA) e valor são obrigatórios." });
+        return;
+      }
+
+      const transaction = await prisma.supplierTransaction.create({
+        data: {
+          supplierName: String(supplierName).trim().toUpperCase(),
+          orderId: orderId ? Number(orderId) : null,
+          date: date ? new Date(date) : new Date(),
+          type: normalizedType,
+          amount: Number(amount) || 0,
+          description: description ? String(description).trim() : null
+        }
+      });
+
+      emitRealtimeEvent("supplier:updated", { action: "transaction_created", transaction });
+      res.status(201).json(transaction);
+    } catch (error) {
+      console.error("Erro ao registrar transação de fornecedor:", error);
+      res.status(500).json({ error: "Erro ao registrar depósito/nota do fornecedor." });
+    }
+  },
+
+  async removeSupplierTransaction(req: Request, res: Response): Promise<void> {
+    try {
+      const id = Number(req.params.id);
+      await prisma.supplierTransaction.delete({ where: { id } });
+      emitRealtimeEvent("supplier:updated", { action: "transaction_deleted", transactionId: id });
+      res.json({ message: "Lançamento removido com sucesso." });
+    } catch (error) {
+      console.error("Erro ao remover transação de fornecedor:", error);
+      res.status(500).json({ error: "Erro ao remover lançamento do fornecedor." });
     }
   },
 

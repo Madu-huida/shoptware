@@ -13,6 +13,7 @@ export type RealtimeEventName =
   | "financial:updated"
   | "supplier:updated"
   | "warranty:updated"
+  | "backup:saved"
   | "system:sync";
 
 export interface ConnectedDeviceInfo {

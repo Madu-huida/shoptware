@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import ExcelJS from "exceljs";
 import { prisma } from "../lib/prisma";
+import { listLocalBackups, saveMonthlyBackupToDisk } from "../lib/backupScheduler";
 
 const MONTH_NAMES_PT = [
   "Janeiro",
@@ -301,6 +302,33 @@ export const exportController = {
     } catch (error) {
       console.error("Erro ao exportar planilha Arquivo Morto:", error);
       res.status(500).json({ error: "Erro ao gerar arquivo Excel (.xlsx) do Arquivo Morto." });
+    }
+  },
+
+  async saveMonthlyBackupLocal(req: Request, res: Response): Promise<void> {
+    try {
+      const now = new Date();
+      const month = Number(req.body?.month ?? req.query.month) || now.getUTCMonth() + 1;
+      const year = Number(req.body?.year ?? req.query.year) || now.getUTCFullYear();
+
+      const backupInfo = await saveMonthlyBackupToDisk(month, year);
+      res.json({
+        message: `Backup salvo com sucesso na pasta local ./backups/${backupInfo.fileName}`,
+        backup: backupInfo
+      });
+    } catch (error) {
+      console.error("Erro ao salvar backup local Arquivo Morto:", error);
+      res.status(500).json({ error: "Erro ao salvar backup local do Arquivo Morto." });
+    }
+  },
+
+  async listMonthlyBackupsLocal(_req: Request, res: Response): Promise<void> {
+    try {
+      const backups = listLocalBackups();
+      res.json(backups);
+    } catch (error) {
+      console.error("Erro ao listar backups locais:", error);
+      res.status(500).json({ error: "Erro ao listar arquivos de backup local." });
     }
   }
 };

@@ -5,17 +5,18 @@ import { exportController } from "../controllers/exportController";
 import { expenseController } from "../controllers/expenseController";
 import { financialController } from "../controllers/financialController";
 import { supplierWarrantyController } from "../controllers/supplierWarrantyController";
-import { requirePcForStockAdjustment } from "../middlewares/devicePermission";
+import { requirePcForStockAdjustment, verifyAdminPin } from "../middlewares/devicePermission";
 
 const router = Router();
 
-// Healthcheck
+// Healthcheck e Validação de PIN Admin do PC
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", app: "shoptware-backend", timestamp: new Date().toISOString() });
 });
+router.post("/auth/verify-pin", verifyAdminPin);
 
 // ============================================================================
-// 1. ESTOQUE DE PRODUTOS E PERFUMES (Ajuste manual restrito ao PC)
+// 1. ESTOQUE DE PRODUTOS E PERFUMES (Ajuste manual restrito ao PC + PIN Admin)
 // ============================================================================
 router.get("/products", productController.list);
 router.get("/products/physical-checks", productController.listPhysicalChecks);
@@ -26,9 +27,11 @@ router.put("/products/:id", requirePcForStockAdjustment, productController.updat
 router.delete("/products/:id", requirePcForStockAdjustment, productController.remove);
 
 // ============================================================================
-// 2. CONTROLE DE VENDAS (PC e Celular - com baixa e estorno de estoque)
+// 2. CONTROLE DE VENDAS E BACKUP ARQUIVO MORTO (PC e Celular)
 // ============================================================================
 router.get("/sales/export", exportController.exportMonthlySalesXlsx);
+router.post("/sales/backup-local", exportController.saveMonthlyBackupLocal);
+router.get("/sales/backups", exportController.listMonthlyBackupsLocal);
 router.get("/sales", saleController.list);
 router.post("/sales", saleController.create);
 router.put("/sales/:id", saleController.update);
@@ -50,9 +53,10 @@ router.put("/bills/:id", expenseController.updateBill);
 router.delete("/bills/:id", expenseController.removeBill);
 
 // ============================================================================
-// 4. DASHBOARD FINANCEIRO, ENTRADAS, VALORES REAIS E TAXAS
+// 4. DASHBOARD FINANCEIRO, FECHAMENTO MÊS ANTERIOR, ENTRADAS, VALORES REAIS E TAXAS
 // ============================================================================
 router.get("/financial/dashboard", financialController.getDashboard);
+router.post("/financial/monthly-closing", financialController.upsertMonthlyClosing);
 router.get("/financial/entries", financialController.listEntries);
 router.post("/financial/entries", financialController.upsertEntry);
 
@@ -66,12 +70,16 @@ router.post("/financial/card-fees/simulate", financialController.simulateCardFee
 router.get("/financial/card-fees/simulate", financialController.simulateCardFees);
 
 // ============================================================================
-// 5. FORNECEDORES (PARAGUAI) E TERMOS DE GARANTIA
+// 5. FORNECEDORES (PARAGUAI - JAPA) E TERMOS DE GARANTIA
 // ============================================================================
 router.get("/suppliers/orders", supplierWarrantyController.listSupplierOrders);
 router.post("/suppliers/orders", supplierWarrantyController.createSupplierOrder);
 router.put("/suppliers/orders/:id", supplierWarrantyController.updateSupplierOrder);
 router.delete("/suppliers/orders/:id", supplierWarrantyController.removeSupplierOrder);
+
+router.get("/suppliers/transactions", supplierWarrantyController.listSupplierTransactions);
+router.post("/suppliers/transactions", supplierWarrantyController.createSupplierTransaction);
+router.delete("/suppliers/transactions/:id", supplierWarrantyController.removeSupplierTransaction);
 
 router.get("/warranties", supplierWarrantyController.listWarranties);
 router.get("/warranties/:id", supplierWarrantyController.getWarrantyById);

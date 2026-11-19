@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import routes from "./routes";
 import { ensureInitialSeed } from "./seedDefaultData";
 import { initSocket } from "./lib/socket";
+import { initMonthlyBackupCron } from "./lib/backupScheduler";
 
 dotenv.config();
 
@@ -20,7 +21,7 @@ app.use(
   cors({
     origin: "*",
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-device-type"]
+    allowedHeaders: ["Content-Type", "Authorization", "x-device-type", "x-admin-pin"]
   })
 );
 
@@ -32,6 +33,7 @@ app.use("/api", routes);
 async function bootstrap() {
   try {
     await ensureInitialSeed();
+    initMonthlyBackupCron();
     httpServer.listen(PORT, "0.0.0.0", () => {
       console.log(
         `Servidor Shoptware Backend + Socket.io rodando na porta ${PORT} (http://0.0.0.0:${PORT})`
