@@ -47,8 +47,14 @@ interface SimulationItem {
   id: number;
   type: string;
   installments: number;
+  customerRate: number;
+  fixedFee: number;
+  extraInstallmentFee: number;
+  addedFeeValue: number;
   finalCustomerValue: number;
   installmentValue: number;
+  machineDiscountRate: number;
+  machineFeeValue: number;
   netReceiveValue: number;
 }
 
@@ -72,6 +78,9 @@ export const PdvMobilePage: React.FC = () => {
   const [neighborhood, setNeighborhood] = useState("LOCAL");
   const [grossValue, setGrossValue] = useState("");
   const [netSaleValue, setNetSaleValue] = useState("");
+  const [showSecondPayment, setShowSecondPayment] = useState(false);
+  const [secondaryNetValue, setSecondaryNetValue] = useState("");
+  const [secondaryPaymentMethod, setSecondaryPaymentMethod] = useState("PIX MASTER");
   const [stockValue, setStockValue] = useState("");
   const [deliveryFee, setDeliveryFee] = useState("0");
   const [cooperValue, setCooperValue] = useState("0");
@@ -156,6 +165,7 @@ export const PdvMobilePage: React.FC = () => {
     try {
       const parsedGross = Number(grossValue) || 0;
       const parsedNet = netSaleValue !== "" ? Number(netSaleValue) : parsedGross;
+      const parsedSecondaryNet = showSecondPayment ? Number(secondaryNetValue) || 0 : 0;
       const parsedStock =
         stockValue !== ""
           ? Number(stockValue)
@@ -174,6 +184,11 @@ export const PdvMobilePage: React.FC = () => {
             productId: selectedProduct ? selectedProduct.id : null,
             productName: finalProductName,
             grossValue: parsedGross,
+            secondaryNetValue: parsedSecondaryNet,
+            secondaryPaymentMethod:
+              showSecondPayment && parsedSecondaryNet > 0
+                ? secondaryPaymentMethod.trim().toUpperCase()
+                : null,
             netSaleValue: parsedNet,
             stockValue: parsedStock,
             extraValue: 0,
@@ -198,6 +213,8 @@ export const PdvMobilePage: React.FC = () => {
       setQuantity("1");
       setGrossValue("");
       setNetSaleValue("");
+      setSecondaryNetValue("");
+      setShowSecondPayment(false);
       setStockValue("");
       setDeliveryFee("0");
       setCooperValue("0");
@@ -247,17 +264,19 @@ export const PdvMobilePage: React.FC = () => {
 
   const parsedNetPreview =
     netSaleValue !== "" ? Number(netSaleValue) || 0 : Number(grossValue) || 0;
+  const parsedSecondaryNetPreview = showSecondPayment ? Number(secondaryNetValue) || 0 : 0;
+  const parsedTotalNetPreview = Number((parsedNetPreview + parsedSecondaryNetPreview).toFixed(2));
   const parsedStockPreview = Number(stockValue) || 0;
   const parsedMotoPreview = Number(deliveryFee) || 0;
   const diffPreview = Number(
-    (parsedNetPreview - parsedStockPreview - parsedMotoPreview).toFixed(2)
+    (parsedTotalNetPreview - parsedStockPreview - parsedMotoPreview).toFixed(2)
   );
 
   const dayTotals = daySales.reduce(
     (acc, s) => {
       if (s.status === "COMPLETED") {
         acc.qty += s.quantity;
-        acc.net += s.netSaleValue;
+        acc.net += s.netSaleValue + (s.secondaryNetValue || 0);
         acc.moto += s.deliveryFee;
       }
       return acc;
@@ -691,6 +710,68 @@ export const PdvMobilePage: React.FC = () => {
               </div>
             </div>
 
+            {/* Opção de Segundo Pagamento (Coluna J - Pagamento Duplo) */}
+            <div className="border border-emerald-200 rounded-xl p-3 bg-emerald-50/40 space-y-3">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="pdv-toggle-second-payment"
+                  className="inline-flex items-center gap-2 text-xs font-bold text-emerald-900 cursor-pointer"
+                >
+                  <input
+                    id="pdv-toggle-second-payment"
+                    name="showSecondPayment"
+                    type="checkbox"
+                    checked={showSecondPayment}
+                    onChange={(e) => {
+                      setShowSecondPayment(e.target.checked);
+                      if (!e.target.checked) setSecondaryNetValue("");
+                    }}
+                  />
+                  <span>Adicionar 2º Pagamento (Opcional — Coluna J)</span>
+                </label>
+              </div>
+
+              {showSecondPayment && (
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label
+                      htmlFor="pdv-secondary-net"
+                      className="block text-xs font-bold text-emerald-900 mb-1"
+                    >
+                      Valor 2º Pag. (Col. J R$)
+                    </label>
+                    <input
+                      id="pdv-secondary-net"
+                      name="secondaryNetValue"
+                      type="text"
+                      inputMode="decimal"
+                      value={secondaryNetValue}
+                      onChange={(e) => setSecondaryNetValue(e.target.value)}
+                      placeholder="Ex: 500"
+                      className="w-full border border-emerald-400 bg-white rounded-xl px-3 py-2 text-base font-bold text-emerald-900"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="pdv-secondary-method"
+                      className="block text-xs font-bold text-emerald-900 mb-1"
+                    >
+                      2ª Forma de Pagamento
+                    </label>
+                    <input
+                      id="pdv-secondary-method"
+                      name="secondaryPaymentMethod"
+                      type="text"
+                      value={secondaryPaymentMethod}
+                      onChange={(e) => setSecondaryPaymentMethod(e.target.value)}
+                      placeholder="Ex: DINHEIRO"
+                      className="w-full border border-emerald-400 bg-white rounded-xl px-3 py-2 text-base font-bold uppercase"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Resumo Rápido antes de Confirmar */}
             <div className="bg-emerald-950 text-white rounded-xl p-3.5 grid grid-cols-3 gap-2 text-center text-xs">
               <div>
@@ -720,7 +801,7 @@ export const PdvMobilePage: React.FC = () => {
             >
               {submitting
                 ? "Registrando Venda..."
-                : `Confirmar Venda (${formatBRL(parsedNetPreview)})`}
+                : `Confirmar Venda (${formatBRL(parsedTotalNetPreview)})`}
             </button>
           </form>
         </div>
@@ -784,11 +865,15 @@ export const PdvMobilePage: React.FC = () => {
                       </div>
                       <div className="text-xs text-slate-500">
                         Bairro: <strong>{s.neighborhood}</strong> • Pagamento:{" "}
-                        <strong>{s.paymentMethod}</strong>
+                        <strong>
+                          {s.secondaryPaymentMethod
+                            ? `${s.paymentMethod} + ${s.secondaryPaymentMethod}`
+                            : s.paymentMethod}
+                        </strong>
                       </div>
                     </div>
                     <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 font-extrabold text-xs">
-                      {formatBRL(s.netSaleValue)}
+                      {formatBRL(s.netSaleValue + (s.secondaryNetValue || 0))}
                     </span>
                   </div>
 
@@ -842,16 +927,32 @@ export const PdvMobilePage: React.FC = () => {
                 className="w-full border border-emerald-400 rounded-xl px-3 py-2 text-base font-bold"
               />
             </div>
-            <div className="max-h-52 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl text-xs">
+            <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl text-xs">
               {simulations.map((sim) => (
-                <div key={sim.id} className="p-2.5 flex items-center justify-between">
-                  <span className="font-bold text-slate-900">{sim.type}</span>
-                  <span className="text-slate-700">
-                    {sim.installments}x de <strong>{formatBRL(sim.installmentValue)}</strong>
-                  </span>
-                  <span className="font-bold text-emerald-700">
-                    Total: {formatBRL(sim.finalCustomerValue)}
-                  </span>
+                <div
+                  key={sim.id}
+                  className="p-2.5 flex items-center justify-between gap-2 hover:bg-emerald-50/40"
+                >
+                  <div>
+                    <div className="font-bold text-slate-900">
+                      {sim.type}{" "}
+                      <span className="text-[10px] font-semibold text-slate-500">
+                        ({(sim.customerRate * 100).toFixed(2)}%
+                        {sim.fixedFee > 0 ? ` + R$ ${sim.fixedFee}` : ""})
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-600">
+                      {sim.installments}x de <strong>{formatBRL(sim.installmentValue)}</strong>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-emerald-700">
+                      Cliente: {formatBRL(sim.finalCustomerValue)}
+                    </div>
+                    <div className="text-[11px] text-slate-600">
+                      Receber: <strong>{formatBRL(sim.netReceiveValue)}</strong>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>

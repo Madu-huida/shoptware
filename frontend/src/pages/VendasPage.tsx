@@ -8,7 +8,8 @@ import {
   Check,
   X,
   Edit3,
-  FileSpreadsheet
+  FileSpreadsheet,
+  HardDriveDownload
 } from "lucide-react";
 import { apiFetch, formatBRL, formatDateBR, getExportSalesUrl, toISODateInput } from "../lib/api";
 import { useRealtime } from "../context/RealtimeContext";
@@ -22,6 +23,8 @@ export interface SaleRecord {
   productId: number | null;
   productName: string;
   grossValue: number;
+  secondaryNetValue?: number;
+  secondaryPaymentMethod?: string | null;
   netSaleValue: number;
   stockValue: number;
   extraValue: number;
@@ -37,6 +40,7 @@ export interface SaleRecord {
 interface SalesTotals {
   totalQuantity: number;
   totalGrossValue: number;
+  totalSecondaryNetValue: number;
   totalNetSaleValue: number;
   totalStockValue: number;
   totalExtraValue: number;
@@ -83,6 +87,8 @@ export const VendasPage: React.FC = () => {
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [productName, setProductName] = useState("");
   const [grossValue, setGrossValue] = useState("");
+  const [secondaryNetValue, setSecondaryNetValue] = useState("0");
+  const [secondaryPaymentMethod, setSecondaryPaymentMethod] = useState("");
   const [netSaleValue, setNetSaleValue] = useState("");
   const [stockValue, setStockValue] = useState("");
   const [extraValue, setExtraValue] = useState("0");
@@ -143,6 +149,7 @@ export const VendasPage: React.FC = () => {
       if (s.status === "COMPLETED") {
         acc.totalQuantity += s.quantity;
         acc.totalGrossValue += s.grossValue;
+        acc.totalSecondaryNetValue += s.secondaryNetValue || 0;
         acc.totalNetSaleValue += s.netSaleValue;
         acc.totalStockValue += s.stockValue;
         acc.totalExtraValue += s.extraValue;
@@ -156,6 +163,7 @@ export const VendasPage: React.FC = () => {
     {
       totalQuantity: 0,
       totalGrossValue: 0,
+      totalSecondaryNetValue: 0,
       totalNetSaleValue: 0,
       totalStockValue: 0,
       totalExtraValue: 0,
@@ -186,6 +194,8 @@ export const VendasPage: React.FC = () => {
     setSelectedProductId("");
     setProductName("");
     setGrossValue("");
+    setSecondaryNetValue("0");
+    setSecondaryPaymentMethod("");
     setNetSaleValue("");
     setStockValue("");
     setExtraValue("0");
@@ -205,6 +215,8 @@ export const VendasPage: React.FC = () => {
     setSelectedProductId(s.productId ? String(s.productId) : "");
     setProductName(s.productName);
     setGrossValue(String(s.grossValue));
+    setSecondaryNetValue(String(s.secondaryNetValue || 0));
+    setSecondaryPaymentMethod(s.secondaryPaymentMethod || "");
     setNetSaleValue(String(s.netSaleValue));
     setStockValue(String(s.stockValue));
     setExtraValue(String(s.extraValue));
@@ -227,6 +239,8 @@ export const VendasPage: React.FC = () => {
         productId: selectedProductId ? Number(selectedProductId) : null,
         productName,
         grossValue: Number(grossValue) || 0,
+        secondaryNetValue: Number(secondaryNetValue) || 0,
+        secondaryPaymentMethod: secondaryPaymentMethod.trim() || null,
         netSaleValue: netSaleValue !== "" ? Number(netSaleValue) : Number(grossValue) || 0,
         stockValue: Number(stockValue) || 0,
         extraValue: Number(extraValue) || 0,
@@ -298,8 +312,25 @@ export const VendasPage: React.FC = () => {
     }
   };
 
+  const handleSaveLocalBackup = async () => {
+    try {
+      setErrorMsg(null);
+      const res = await apiFetch<{ message: string }>("/sales/backup-local", {
+        method: "POST",
+        body: JSON.stringify({
+          month: Number(selectedMonth),
+          year: Number(selectedYear)
+        })
+      });
+      setFeedbackMsg(res.message);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Erro ao salvar backup local.");
+    }
+  };
+
   const previewDiff =
-    (Number(netSaleValue !== "" ? netSaleValue : grossValue) || 0) -
+    ((Number(secondaryNetValue) || 0) +
+      (Number(netSaleValue !== "" ? netSaleValue : grossValue) || 0)) -
     (Number(stockValue) || 0) -
     (Number(deliveryFee) || 0) -
     (Number(extraValue) || 0);
@@ -378,6 +409,15 @@ export const VendasPage: React.FC = () => {
             <FileSpreadsheet className="w-4 h-4" />
             <span>Exportar Arquivo Morto (.xlsx)</span>
           </a>
+
+          <button
+            type="button"
+            onClick={handleSaveLocalBackup}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs sm:text-sm font-semibold shadow-sm transition cursor-pointer"
+          >
+            <HardDriveDownload className="w-4 h-4" />
+            <span>Salvar Backup na Pasta Local</span>
+          </button>
 
           <button
             type="button"
@@ -542,7 +582,7 @@ export const VendasPage: React.FC = () => {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                VENDAS (Líquido Recebido R$) *
+                VENDAS (1º Pag. Líquido Col. L R$) *
               </label>
               <input
                 type="number"
@@ -550,8 +590,36 @@ export const VendasPage: React.FC = () => {
                 required
                 value={netSaleValue}
                 onChange={(e) => setNetSaleValue(e.target.value)}
-                placeholder="Valor líquido após maquininha"
+                placeholder="Valor líquido 1º pagamento"
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-emerald-800 mb-1">
+                2º Pagamento Líquido (Col. J R$ - Opcional)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={secondaryNetValue}
+                onChange={(e) => setSecondaryNetValue(e.target.value)}
+                placeholder="Ex: Entrada PIX / Dinheiro"
+                className="w-full border border-emerald-300 bg-emerald-50/40 rounded-lg px-3 py-2 text-sm font-semibold"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-emerald-800 mb-1">
+                2ª Forma de Pagamento (Opcional)
+              </label>
+              <input
+                type="text"
+                list="payment-methods-list"
+                value={secondaryPaymentMethod}
+                onChange={(e) => setSecondaryPaymentMethod(e.target.value)}
+                placeholder="Ex: DINHEIRO, PIX MASTER..."
+                className="w-full border border-emerald-300 bg-emerald-50/40 rounded-lg px-3 py-2 text-sm uppercase"
               />
             </div>
 
@@ -702,7 +770,8 @@ export const VendasPage: React.FC = () => {
                 <th className="py-3 px-3">Bairro</th>
                 <th className="py-3 px-2 text-center">Nº</th>
                 <th className="py-3 px-3 text-right">Valor Bruto</th>
-                <th className="py-3 px-3 text-right">Vendas</th>
+                <th className="py-3 px-3 text-right">2º Pag. (Col. J)</th>
+                <th className="py-3 px-3 text-right">Vendas (Col. L)</th>
                 <th className="py-3 px-3 text-right">Valor Estoque</th>
                 <th className="py-3 px-2 text-right">Extra</th>
                 <th className="py-3 px-2 text-right">Moto</th>
@@ -715,7 +784,7 @@ export const VendasPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {filteredSales.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="py-8 text-center text-slate-400">
+                  <td colSpan={14} className="py-8 text-center text-slate-400">
                     Nenhuma venda encontrada para a seleção atual.
                   </td>
                 </tr>
@@ -740,6 +809,9 @@ export const VendasPage: React.FC = () => {
                     <td className="py-2.5 px-3 text-right whitespace-nowrap">
                       {formatBRL(s.grossValue)}
                     </td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-emerald-600 whitespace-nowrap">
+                      {s.secondaryNetValue ? formatBRL(s.secondaryNetValue) : "-"}
+                    </td>
                     <td className="py-2.5 px-3 text-right font-bold text-emerald-700 whitespace-nowrap">
                       {formatBRL(s.netSaleValue)}
                     </td>
@@ -754,7 +826,9 @@ export const VendasPage: React.FC = () => {
                     </td>
                     <td className="py-2.5 px-3 whitespace-nowrap">
                       <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-semibold">
-                        {s.paymentMethod}
+                        {s.secondaryPaymentMethod
+                          ? `${s.paymentMethod} + ${s.secondaryPaymentMethod}`
+                          : s.paymentMethod}
                       </span>
                     </td>
                     <td className="py-2.5 px-2 text-right whitespace-nowrap text-slate-600">
@@ -804,7 +878,7 @@ export const VendasPage: React.FC = () => {
               )}
             </tbody>
 
-            {/* Rodapé de Totais (Idêntico à linha 34 da planilha Vendas Dia / Arquivo Morto) */}
+            {/* Rodapé de Totais (Idêntico à linha 36 da planilha Vendas Dia / Arquivo Morto: R36 = J36 + L36) */}
             {filteredSales.length > 0 && (
               <tfoot className="bg-emerald-950 text-white font-bold text-xs">
                 <tr>
@@ -814,6 +888,9 @@ export const VendasPage: React.FC = () => {
                   <td className="py-3 px-2 text-center">{filteredTotals.totalQuantity}</td>
                   <td className="py-3 px-3 text-right">
                     {formatBRL(filteredTotals.totalGrossValue)}
+                  </td>
+                  <td className="py-3 px-3 text-right text-emerald-300">
+                    {formatBRL(filteredTotals.totalSecondaryNetValue)}
                   </td>
                   <td className="py-3 px-3 text-right text-emerald-300">
                     {formatBRL(filteredTotals.totalNetSaleValue)}
@@ -828,7 +905,9 @@ export const VendasPage: React.FC = () => {
                     {formatBRL(filteredTotals.totalDeliveryFee)}
                   </td>
                   <td className="py-3 px-3 text-right text-emerald-300">
-                    {formatBRL(filteredTotals.totalNetSaleValue)}
+                    {formatBRL(
+                      filteredTotals.totalSecondaryNetValue + filteredTotals.totalNetSaleValue
+                    )}
                   </td>
                   <td className="py-3 px-2 text-right">
                     {formatBRL(filteredTotals.totalCooperValue)}
@@ -855,7 +934,10 @@ export const VendasPage: React.FC = () => {
               ), o produto retorna automaticamente para o estoque.
             </span>
             <span>
-              Total Líquido do Mês: <strong className="text-emerald-800">{formatBRL(totals.totalNetSaleValue)}</strong>
+              Total Líquido do Mês (J + L):{" "}
+              <strong className="text-emerald-800">
+                {formatBRL((totals.totalSecondaryNetValue || 0) + totals.totalNetSaleValue)}
+              </strong>
             </span>
           </div>
         )}

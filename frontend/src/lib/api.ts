@@ -1,6 +1,22 @@
 export type DeviceMode = "PC" | "MOBILE";
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
+const ADMIN_PIN_STORAGE_KEY = "shoptware_admin_pin";
+
+export function getStoredAdminPin(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem(ADMIN_PIN_STORAGE_KEY) || "";
+}
+
+export function setStoredAdminPin(pin: string): void {
+  if (typeof window === "undefined") return;
+  const trimmed = pin.trim();
+  if (trimmed) {
+    localStorage.setItem(ADMIN_PIN_STORAGE_KEY, trimmed);
+  } else {
+    localStorage.removeItem(ADMIN_PIN_STORAGE_KEY);
+  }
+}
 
 export function getStoredDeviceMode(): DeviceMode {
   const saved = localStorage.getItem("shoptware_device_mode");
@@ -25,6 +41,11 @@ export async function apiFetch<T>(
     headers.set("Content-Type", "application/json");
   }
   headers.set("x-device-type", mode);
+
+  const adminPin = getStoredAdminPin();
+  if (adminPin && !headers.has("x-admin-pin")) {
+    headers.set("x-admin-pin", adminPin);
+  }
 
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,

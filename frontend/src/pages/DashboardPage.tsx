@@ -11,7 +11,10 @@ import {
   Receipt,
   RefreshCw,
   ArrowUpRight,
-  FileSpreadsheet
+  FileSpreadsheet,
+  HardDriveDownload,
+  Check,
+  SlidersHorizontal
 } from "lucide-react";
 import { apiFetch, formatBRL, formatDateBR, getExportSalesUrl } from "../lib/api";
 import { useRealtime } from "../context/RealtimeContext";
@@ -28,10 +31,22 @@ interface DashboardResponse {
     outrasEntradas: number;
     estoque: number;
     gastosGeral: number;
+    gastosCartao?: number;
     gastosCompras: number;
     gastosBig: number;
     gastosHuidaTransportes: number;
+    previousMonthExpense: number;
+    previousMonthBalance: number;
+    huidaToBigTransfer: number;
     totalContasAPagar: number;
+  };
+  monthlyClosing?: {
+    month: number;
+    year: number;
+    previousMonthExpense: number;
+    previousMonthBalance: number;
+    huidaToBigTransfer: number;
+    notes: string | null;
   };
   counts: {
     salesCount: number;
@@ -47,6 +62,8 @@ interface SaleItem {
   quantity: number;
   productName: string;
   grossValue: number;
+  secondaryNetValue?: number;
+  secondaryPaymentMethod?: string | null;
   netSaleValue: number;
   stockValue: number;
   deliveryFee: number;
@@ -65,6 +82,13 @@ export const DashboardPage: React.FC = () => {
   const [recentSales, setRecentSales] = useState<SaleItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
+  // Estados editáveis do Fechamento da Aba TOTAL (Mês Anterior e Saídas Huida p/ BIG)
+  const [prevExpenseInput, setPrevExpenseInput] = useState<string>("0");
+  const [prevBalanceInput, setPrevBalanceInput] = useState<string>("0");
+  const [huidaTransferInput, setHuidaTransferInput] = useState<string>("0");
+  const [savingClosing, setSavingClosing] = useState<boolean>(false);
+  const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
+
   useEffect(() => {
     let active = true;
     async function loadData() {
@@ -77,6 +101,9 @@ export const DashboardPage: React.FC = () => {
         ]);
         if (!active) return;
         setDashboard(dashData);
+        setPrevExpenseInput(String(dashData.totals.previousMonthExpense ?? 0));
+        setPrevBalanceInput(String(dashData.totals.previousMonthBalance ?? 0));
+        setHuidaTransferInput(String(dashData.totals.huidaToBigTransfer ?? 0));
         setRecentSales(salesData.sales.slice(0, 8));
       } catch (err) {
         console.error("Erro ao carregar dashboard:", err);
@@ -89,6 +116,46 @@ export const DashboardPage: React.FC = () => {
       active = false;
     };
   }, [selectedMonth, selectedYear, filterAll, syncVersion]);
+
+  const handleSaveMonthlyClosing = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingClosing(true);
+    setStatusFeedback(null);
+    try {
+      await apiFetch("/financial/monthly-closing", {
+        method: "POST",
+        body: JSON.stringify({
+          month: Number(selectedMonth),
+          year: Number(selectedYear),
+          previousMonthExpense: Number(prevExpenseInput) || 0,
+          previousMonthBalance: Number(prevBalanceInput) || 0,
+          huidaToBigTransfer: Number(huidaTransferInput) || 0
+        })
+      });
+      setStatusFeedback("Fechamento da aba TOTAL atualizado com sucesso.");
+      triggerManualSync();
+    } catch (err) {
+      setStatusFeedback(err instanceof Error ? err.message : "Erro ao salvar fechamento.");
+    } finally {
+      setSavingClosing(false);
+    }
+  };
+
+  const handleSaveLocalBackup = async () => {
+    setStatusFeedback(null);
+    try {
+      const res = await apiFetch<{ message: string }>("/sales/backup-local", {
+        method: "POST",
+        body: JSON.stringify({
+          month: Number(selectedMonth),
+          year: Number(selectedYear)
+        })
+      });
+      setStatusFeedback(res.message);
+    } catch (err) {
+      setStatusFeedback(err instanceof Error ? err.message : "Erro ao salvar backup local.");
+    }
+  };
 
   const t = dashboard?.totals;
 
@@ -166,6 +233,15 @@ export const DashboardPage: React.FC = () => {
 
           <button
             type="button"
+            onClick={handleSaveLocalBackup}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold transition cursor-pointer"
+          >
+            <HardDriveDownload className="w-3.5 h-3.5" />
+            <span>Salvar Backup na Pasta Local</span>
+          </button>
+
+          <button
+            type="button"
             onClick={triggerManualSync}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition cursor-pointer"
           >
@@ -174,6 +250,23 @@ export const DashboardPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {statusFeedback && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-xl text-xs font-semibold flex items-center justify-between"
+        >
+          <span>{statusFeedback}</span>
+          <button
+            type="button"
+            onClick={() => setStatusFeedback(null)}
+            className="text-emerald-700 hover:text-emerald-950 font-bold cursor-pointer"
+          >
+            Fechar
+          </button>
+        </div>
+      )}
 
       {/* Linha 1: 3 Blocos Principais da Aba TOTAL (TOTAL GERAL / TOTAL FATURADO / GASTOS) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -237,6 +330,10 @@ export const DashboardPage: React.FC = () => {
               <span className="text-slate-600 font-medium">OUTRAS ENTRADAS</span>
               <strong className="text-slate-900">{formatBRL(t?.outrasEntradas)}</strong>
             </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
+              <span className="text-slate-600 font-medium">MÊS ANTERIOR (Saldo)</span>
+              <strong className="text-slate-900">{formatBRL(t?.previousMonthBalance)}</strong>
+            </div>
             <div className="flex items-center justify-between pt-2 bg-emerald-50 px-3 py-2 rounded-lg">
               <span className="text-emerald-900 font-bold text-xs uppercase">VALOR EM ESTOQUE</span>
               <strong className="text-emerald-800 font-bold">{formatBRL(t?.estoque)}</strong>
@@ -270,6 +367,14 @@ export const DashboardPage: React.FC = () => {
               <span className="text-slate-600 font-medium">GASTOS HUIDA TRANSPORTES</span>
               <strong className="text-slate-900">{formatBRL(t?.gastosHuidaTransportes)}</strong>
             </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
+              <span className="text-slate-600 font-medium">MÊS ANTERIOR (Gastos)</span>
+              <strong className="text-rose-700">{formatBRL(t?.previousMonthExpense)}</strong>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
+              <span className="text-slate-600 font-medium">SAÍDAS HUIDA PARA BIG</span>
+              <strong className="text-slate-900">{formatBRL(t?.huidaToBigTransfer)}</strong>
+            </div>
             <div className="flex items-center justify-between pt-2 bg-amber-50 px-3 py-2 rounded-lg">
               <span className="text-amber-900 font-bold text-xs uppercase">
                 TOTAL ABA CONTAS ({dashboard?.counts.pendingBillsCount || 0} pendentes)
@@ -279,6 +384,92 @@ export const DashboardPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Painel Editável de Fechamento do Mês Anterior & Transferências (Aba TOTAL) */}
+      {!filterAll && (
+        <form
+          onSubmit={handleSaveMonthlyClosing}
+          aria-labelledby="monthly-closing-heading"
+          className="bg-white rounded-2xl p-5 border border-emerald-200 shadow-sm space-y-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2">
+              <SlidersHorizontal className="w-4 h-4 text-emerald-700" />
+              <h3 id="monthly-closing-heading" className="text-sm font-bold text-slate-900">
+                Ajustes de Fechamento da Aba TOTAL ({selectedMonth}/{selectedYear})
+              </h3>
+            </div>
+            <span className="text-xs text-slate-500">
+              Impacta diretamente o cálculo de SALDO VENDAS, SALDO HUIDA TRANSPORTES e SALDO GERAL
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
+            <div>
+              <label
+                htmlFor="closing-prev-expense"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                MÊS ANTERIOR — Gastos (R$)
+              </label>
+              <input
+                id="closing-prev-expense"
+                name="previousMonthExpense"
+                type="number"
+                step="0.01"
+                value={prevExpenseInput}
+                onChange={(e) => setPrevExpenseInput(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="closing-prev-balance"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                MÊS ANTERIOR — Saldo Geral (R$)
+              </label>
+              <input
+                id="closing-prev-balance"
+                name="previousMonthBalance"
+                type="number"
+                step="0.01"
+                value={prevBalanceInput}
+                onChange={(e) => setPrevBalanceInput(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="closing-huida-transfer"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                SAÍDAS HUIDA PARA BIG (R$)
+              </label>
+              <input
+                id="closing-huida-transfer"
+                name="huidaToBigTransfer"
+                type="number"
+                step="0.01"
+                value={huidaTransferInput}
+                onChange={(e) => setHuidaTransferInput(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingClosing}
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold shadow-sm transition cursor-pointer"
+            >
+              <Check className="w-4 h-4" />
+              <span>{savingClosing ? "Salvando..." : "Salvar Fechamento"}</span>
+            </button>
+          </div>
+        </form>
+      )}
 
       {/* Atalhos Rápidos de Gestão */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

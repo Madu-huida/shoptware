@@ -109,3 +109,14 @@ textarea:user-valid {
   inset: auto 0 0;
   border-block-end: 3px solid var(--brand-color);
 }
+
+/* Native Modal Dialog Scroll Containment (modern-web-guidance: dialog) */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background-color: rgb(2 44 34 / 0.65);
+}
