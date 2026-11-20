@@ -204,6 +204,57 @@ export const financialController = {
         notes: null
       };
 
+      // Comparativo de Vendas por Dia da Semana (Segunda a Domingo) no período selecionado
+      const weekdayOrder = [
+        { dayIndex: 1, label: "Segunda-feira", shortLabel: "Seg" },
+        { dayIndex: 2, label: "Terça-feira", shortLabel: "Ter" },
+        { dayIndex: 3, label: "Quarta-feira", shortLabel: "Qua" },
+        { dayIndex: 4, label: "Quinta-feira", shortLabel: "Qui" },
+        { dayIndex: 5, label: "Sexta-feira", shortLabel: "Sex" },
+        { dayIndex: 6, label: "Sábado", shortLabel: "Sáb" },
+        { dayIndex: 0, label: "Domingo", shortLabel: "Dom" }
+      ];
+
+      const weekdayMap = new Map<
+        number,
+        { salesCount: number; totalQuantity: number; totalNetValue: number; totalDifference: number }
+      >();
+      for (const w of weekdayOrder) {
+        weekdayMap.set(w.dayIndex, {
+          salesCount: 0,
+          totalQuantity: 0,
+          totalNetValue: 0,
+          totalDifference: 0
+        });
+      }
+
+      for (const s of sales) {
+        const d = new Date(s.saleDate);
+        const dayIdx = d.getUTCDay();
+        const curr = weekdayMap.get(dayIdx);
+        if (curr) {
+          curr.salesCount += 1;
+          curr.totalQuantity += s.quantity;
+          curr.totalNetValue = Number(
+            (curr.totalNetValue + s.netSaleValue + (s.secondaryNetValue || 0)).toFixed(2)
+          );
+          curr.totalDifference = Number((curr.totalDifference + s.difference).toFixed(2));
+        }
+      }
+
+      const weeklySales = weekdayOrder.map((w) => {
+        const stats = weekdayMap.get(w.dayIndex)!;
+        return {
+          dayIndex: w.dayIndex,
+          label: w.label,
+          shortLabel: w.shortLabel,
+          salesCount: stats.salesCount,
+          totalQuantity: stats.totalQuantity,
+          totalNetValue: stats.totalNetValue,
+          totalDifference: stats.totalDifference
+        };
+      });
+
       res.json({
         totals: {
           saldoGeral,
@@ -226,6 +277,7 @@ export const financialController = {
           totalContasAPagar
         },
         monthlyClosing: currentClosing,
+        weeklySales,
         counts: {
           salesCount: sales.length,
           productsInStock: products.reduce((acc, p) => acc + p.quantity, 0),

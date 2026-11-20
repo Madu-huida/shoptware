@@ -14,10 +14,22 @@ import {
   FileSpreadsheet,
   HardDriveDownload,
   Check,
-  SlidersHorizontal
+  SlidersHorizontal,
+  BarChart3,
+  Trophy
 } from "lucide-react";
 import { apiFetch, formatBRL, formatDateBR, getExportSalesUrl } from "../lib/api";
 import { useRealtime } from "../context/RealtimeContext";
+
+interface WeeklySaleStat {
+  dayIndex: number;
+  label: string;
+  shortLabel: string;
+  salesCount: number;
+  totalQuantity: number;
+  totalNetValue: number;
+  totalDifference: number;
+}
 
 interface DashboardResponse {
   totals: {
@@ -48,6 +60,7 @@ interface DashboardResponse {
     huidaToBigTransfer: number;
     notes: string | null;
   };
+  weeklySales?: WeeklySaleStat[];
   counts: {
     salesCount: number;
     productsInStock: number;
@@ -88,6 +101,7 @@ export const DashboardPage: React.FC = () => {
   const [huidaTransferInput, setHuidaTransferInput] = useState<string>("0");
   const [savingClosing, setSavingClosing] = useState<boolean>(false);
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
+  const [chartMetric, setChartMetric] = useState<"VALUE" | "QTY">("VALUE");
 
   useEffect(() => {
     let active = true;
@@ -158,6 +172,10 @@ export const DashboardPage: React.FC = () => {
   };
 
   const t = dashboard?.totals;
+  const weeklySales = dashboard?.weeklySales || [];
+  const maxWeeklyValue = Math.max(...weeklySales.map((w) => w.totalNetValue), 1);
+  const maxWeeklyQty = Math.max(...weeklySales.map((w) => w.totalQuantity), 1);
+  const bestWeekday = [...weeklySales].sort((a, b) => b.totalNetValue - a.totalNetValue)[0];
 
   return (
     <div className="space-y-6">
@@ -470,6 +488,128 @@ export const DashboardPage: React.FC = () => {
           </div>
         </form>
       )}
+
+      {/* Gráfico Comparativo de Vendas por Dia da Semana no Período */}
+      <div className="bg-white rounded-2xl p-5 border border-emerald-100 shadow-sm space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center">
+              <BarChart3 className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                Desempenho de Vendas por Dia da Semana ({filterAll ? "Histórico Geral" : `${selectedMonth}/${selectedYear}`})
+              </h3>
+              <p className="text-xs text-slate-500">
+                Comparativo de faturamento líquido e volume de aparelhos vendidos de Segunda a Domingo
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {bestWeekday && bestWeekday.totalNetValue > 0 && (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold">
+                <Trophy className="w-3.5 h-3.5 text-emerald-600" />
+                <span>
+                  Melhor dia: {bestWeekday.label} ({formatBRL(bestWeekday.totalNetValue)} •{" "}
+                  {bestWeekday.totalQuantity} un.)
+                </span>
+              </div>
+            )}
+
+            <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setChartMetric("VALUE")}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  chartMetric === "VALUE"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Por Valor (R$)
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartMetric("QTY")}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  chartMetric === "QTY"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Por Quantidade (Un.)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Gráfico de Barras Responsivo em Tons de Verde Esmeralda */}
+        <div className="grid grid-cols-7 gap-2 sm:gap-4 items-end pt-4 pb-2 px-1">
+          {weeklySales.map((day) => {
+            const metricVal = chartMetric === "VALUE" ? day.totalNetValue : day.totalQuantity;
+            const maxRef = chartMetric === "VALUE" ? maxWeeklyValue : maxWeeklyQty;
+            const heightPct = metricVal > 0 ? Math.max(14, Math.round((metricVal / maxRef) * 100)) : 4;
+            const isBest =
+              bestWeekday &&
+              bestWeekday.dayIndex === day.dayIndex &&
+              bestWeekday.totalNetValue > 0;
+
+            return (
+              <div key={day.dayIndex} className="flex flex-col items-center gap-2">
+                {/* Rótulo de Valor no Topo */}
+                <div className="text-center min-h-[32px] flex flex-col justify-end">
+                  <span
+                    className={`text-[10px] sm:text-xs font-extrabold ${
+                      metricVal > 0
+                        ? isBest
+                          ? "text-emerald-800"
+                          : "text-slate-800"
+                        : "text-slate-400"
+                    }`}
+                  >
+                    {chartMetric === "VALUE"
+                      ? day.totalNetValue > 0
+                        ? formatBRL(day.totalNetValue)
+                        : "R$ 0"
+                      : `${day.totalQuantity} un.`}
+                  </span>
+                </div>
+
+                {/* Coluna da Barra */}
+                <div className="w-full h-40 bg-emerald-50/60 border border-emerald-100 rounded-xl p-1.5 flex items-end justify-center relative">
+                  <div
+                    style={{ height: `${heightPct}%` }}
+                    title={`${day.label}: ${formatBRL(day.totalNetValue)} (${day.totalQuantity} aparelhos em ${day.salesCount} vendas)`}
+                    className={`w-full rounded-lg transition-all duration-300 ${
+                      metricVal === 0
+                        ? "bg-slate-200"
+                        : isBest
+                        ? "bg-gradient-to-t from-emerald-800 to-emerald-500 shadow-md"
+                        : "bg-gradient-to-t from-emerald-600 to-emerald-400"
+                    }`}
+                  />
+                </div>
+
+                {/* Nome do Dia da Semana e Resumo Secundário */}
+                <div className="text-center">
+                  <div
+                    className={`text-xs font-extrabold ${
+                      isBest ? "text-emerald-800" : "text-slate-800"
+                    }`}
+                  >
+                    <span className="hidden sm:inline">{day.label.replace("-feira", "")}</span>
+                    <span className="sm:hidden">{day.shortLabel}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-medium">
+                    {day.totalQuantity} un. ({day.salesCount} v.)
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Atalhos Rápidos de Gestão */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
