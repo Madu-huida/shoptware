@@ -17,7 +17,7 @@ datasource db {
 model Product {
   id              Int      @id @default(autoincrement())
   name            String   // PRODUTO (ex: "REDMI NOTE 17 4G 256GB 8GB RAM PRETO", "Perfume Feminino Lattafa Yara Edp 100 ML")
-  category        String   @default("CELULAR") // "CELULAR", "PECA", "ACESSORIO", "PERFUME_FEMININO", "PERFUME_UNISSEX", "PERFUME_MASCULINO", "OUTROS"
+  category        String   @default("CELULAR") // "CELULAR", "RELOGIO", "FONE", "PERFUME", "PERFUME_FEMININO", "PERFUME_UNISSEX", "PERFUME_MASCULINO", "OUTROS", "PECA"
   
   // Controle de Lotes e Quantidade (Aba "Estoque ")
   lote1           Int      @default(0) // Coluna LOTE1

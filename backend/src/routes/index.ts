@@ -5,15 +5,22 @@ import { exportController } from "../controllers/exportController";
 import { expenseController } from "../controllers/expenseController";
 import { financialController } from "../controllers/financialController";
 import { supplierWarrantyController } from "../controllers/supplierWarrantyController";
-import { requirePcForStockAdjustment, verifyAdminPin } from "../middlewares/devicePermission";
+import {
+  requirePcForStockAdjustment,
+  requireSiteAuth,
+  verifyAdminPin
+} from "../middlewares/devicePermission";
 
 const router = Router();
 
-// Healthcheck e Validação de PIN Admin do PC
+// Healthcheck e Validação de Senha na Entrada do Site (Públicos)
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", app: "shoptware-backend", timestamp: new Date().toISOString() });
 });
 router.post("/auth/verify-pin", verifyAdminPin);
+
+// Todas as rotas de dados abaixo exigem a senha única ("122124") no header x-admin-pin
+router.use(requireSiteAuth);
 
 // ============================================================================
 // 1. ESTOQUE DE PRODUTOS E PERFUMES (Ajuste manual restrito ao PC + PIN Admin)

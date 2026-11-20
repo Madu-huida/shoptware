@@ -5,15 +5,21 @@ const ADMIN_PIN_STORAGE_KEY = "shoptware_admin_pin";
 
 export function getStoredAdminPin(): string {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem(ADMIN_PIN_STORAGE_KEY) || "";
+  return (
+    sessionStorage.getItem(ADMIN_PIN_STORAGE_KEY) ||
+    localStorage.getItem(ADMIN_PIN_STORAGE_KEY) ||
+    ""
+  );
 }
 
 export function setStoredAdminPin(pin: string): void {
   if (typeof window === "undefined") return;
   const trimmed = pin.trim();
   if (trimmed) {
+    sessionStorage.setItem(ADMIN_PIN_STORAGE_KEY, trimmed);
     localStorage.setItem(ADMIN_PIN_STORAGE_KEY, trimmed);
   } else {
+    sessionStorage.removeItem(ADMIN_PIN_STORAGE_KEY);
     localStorage.removeItem(ADMIN_PIN_STORAGE_KEY);
   }
 }
@@ -98,5 +104,6 @@ export function toISODateInput(dateInput?: Date | string): string {
 }
 
 export function getExportSalesUrl(month: string | number, year: string | number): string {
-  return `${API_BASE}/sales/export?month=${month}&year=${year}`;
+  const pin = getStoredAdminPin();
+  return `${API_BASE}/sales/export?month=${month}&year=${year}&pin=${encodeURIComponent(pin)}`;
 }

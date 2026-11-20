@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { emitRealtimeEvent } from "../lib/socket";
+import { ensureInitialSeed } from "../seedDefaultData";
 
 export const financialController = {
   // Dashboard Geral (Replica a aba "TOTAL" consolidando Entradas, Estoque, Fechamento Mês Anterior e Gastos)
@@ -614,14 +615,24 @@ export const financialController = {
   // Simulador idêntico à aba "TAXA" (informando VALOR VENDA e VALOR ENTRADA com taxas fixas + percentuais)
   async simulateCardFees(req: Request, res: Response): Promise<void> {
     try {
-      const saleValue = Number(req.body.saleValue ?? req.query.saleValue ?? 0);
-      const downPayment = Number(req.body.downPayment ?? req.query.downPayment ?? 0);
+      const rawSaleValue = req.body?.saleValue ?? req.query?.saleValue ?? 2900;
+      const rawDownPayment = req.body?.downPayment ?? req.query?.downPayment ?? 0;
+      const saleValue = Number(rawSaleValue) || 0;
+      const downPayment = Number(rawDownPayment) || 0;
       const calculationBase = Math.max(0, Number((saleValue - downPayment).toFixed(2)));
 
-      const rates = await prisma.cardFeeRate.findMany({
+      let rates = await prisma.cardFeeRate.findMany({
         where: { active: true },
         orderBy: { id: "asc" }
       });
+
+      if (rates.length === 0) {
+        await ensureInitialSeed();
+        rates = await prisma.cardFeeRate.findMany({
+          where: { active: true },
+          orderBy: { id: "asc" }
+        });
+      }
 
       const table = rates.map((rate) => {
         // Na planilha original (aba TAXA):

@@ -25,22 +25,40 @@ export async function ensureInitialSeed(): Promise<void> {
   ];
 
   const existingFees = await prisma.cardFeeRate.count();
-  if (existingFees === 0) {
+  if (existingFees < 19) {
     for (const rate of defaultRates) {
-      await prisma.cardFeeRate.create({ data: rate });
+      await prisma.cardFeeRate.upsert({
+        where: { type: rate.type },
+        update: {
+          installments: rate.installments,
+          customerRate: rate.customerRate,
+          fixedFee: rate.fixedFee,
+          extraInstallmentFee: rate.extraInstallmentFee,
+          machineDiscountRate: rate.machineDiscountRate,
+          active: true
+        },
+        create: {
+          ...rate,
+          active: true
+        }
+      });
     }
   } else {
-    // Atualiza taxas existentes caso ainda estejam sem os acréscimos fixos da planilha
+    // Atualiza taxas existentes caso ainda estejam sem os acréscimos fixos da planilha ou inativas
     const creditRate = await prisma.cardFeeRate.findUnique({ where: { type: "CREDITO" } });
-    if (creditRate && creditRate.fixedFee === 0 && creditRate.extraInstallmentFee === 0) {
+    if (!creditRate || (creditRate.fixedFee === 0 && creditRate.extraInstallmentFee === 0)) {
       for (const rate of defaultRates) {
         await prisma.cardFeeRate.upsert({
           where: { type: rate.type },
           update: {
             fixedFee: rate.fixedFee,
-            extraInstallmentFee: rate.extraInstallmentFee
+            extraInstallmentFee: rate.extraInstallmentFee,
+            active: true
           },
-          create: rate
+          create: {
+            ...rate,
+            active: true
+          }
         });
       }
     }
@@ -131,19 +149,19 @@ export async function ensureInitialSeed(): Promise<void> {
       { name: "POCO M8 PRO 5G 256GB 8GB RAM PRETO", category: "CELULAR", lote2: 0, quantity: 0, salePrice: 1950, costPrice: 1580 },
       { name: "INFINIX SMART 10 128GB 4GB RAM PRETO", category: "CELULAR", lote2: 1, quantity: 1, salePrice: 850, costPrice: 680 },
       { name: "INFINIX SMART 10 128GB 4GB RAM DOURADO", category: "CELULAR", lote2: 1, quantity: 1, salePrice: 850, costPrice: 680 },
-      // Acessórios / Eletrônicos (Aba "Estoque ")
-      { name: "CAMERA HIKVION IP", category: "ACESSORIO", lote2: 1, quantity: 1, salePrice: 350, costPrice: 240 },
-      { name: "CAMERA HIKVISION 4K", category: "ACESSORIO", lote2: 1, quantity: 1, salePrice: 400, costPrice: 280 },
-      { name: "CAMERA HIK COLOR VU 2MP", category: "ACESSORIO", lote2: 1, quantity: 1, salePrice: 200, costPrice: 140 },
-      { name: "Fone de Ouvido Redmi Buds 6 Play BRANCO", category: "ACESSORIO", lote2: 4, quantity: 4, salePrice: 100, costPrice: 65 },
-      { name: "Fone de Ouvido Redmi Buds 6 Play AZUL", category: "ACESSORIO", lote2: 4, quantity: 4, salePrice: 100, costPrice: 65 },
-      { name: "Fone de Ouvido Redmi Buds 6 Play PRETO", category: "ACESSORIO", lote2: 2, quantity: 2, salePrice: 100, costPrice: 65 },
-      { name: "FIRE STICK SELECT 4K", category: "ACESSORIO", lote2: 1, quantity: 1, salePrice: 230, costPrice: 164.1 },
-      { name: "FIRE STICK 4K 2 GERAÇÃO", category: "ACESSORIO", lote2: 2, quantity: 2, salePrice: 280, costPrice: 200 },
-      { name: "ECHO DOTS 5 GER PRETA", category: "ACESSORIO", lote2: 1, quantity: 1, salePrice: 450, costPrice: 330 },
-      { name: "JBL FLIP 7 AZUL", category: "ACESSORIO", lote2: 1, quantity: 1, salePrice: 550, costPrice: 410 },
-      { name: "JBL FLIP 7 PRETO", category: "ACESSORIO", lote2: 1, quantity: 1, salePrice: 550, costPrice: 410 },
-      { name: "Relógio Redmi Watch 5 Active preto", category: "ACESSORIO", lote2: 1, quantity: 1, salePrice: 260, costPrice: 185 },
+      // Fones, Relógios e Outros Eletrônicos (Aba "Estoque ")
+      { name: "CAMERA HIKVION IP", category: "OUTROS", lote2: 1, quantity: 1, salePrice: 350, costPrice: 240 },
+      { name: "CAMERA HIKVISION 4K", category: "OUTROS", lote2: 1, quantity: 1, salePrice: 400, costPrice: 280 },
+      { name: "CAMERA HIK COLOR VU 2MP", category: "OUTROS", lote2: 1, quantity: 1, salePrice: 200, costPrice: 140 },
+      { name: "Fone de Ouvido Redmi Buds 6 Play BRANCO", category: "FONE", lote2: 4, quantity: 4, salePrice: 100, costPrice: 65 },
+      { name: "Fone de Ouvido Redmi Buds 6 Play AZUL", category: "FONE", lote2: 4, quantity: 4, salePrice: 100, costPrice: 65 },
+      { name: "Fone de Ouvido Redmi Buds 6 Play PRETO", category: "FONE", lote2: 2, quantity: 2, salePrice: 100, costPrice: 65 },
+      { name: "FIRE STICK SELECT 4K", category: "OUTROS", lote2: 1, quantity: 1, salePrice: 230, costPrice: 164.1 },
+      { name: "FIRE STICK 4K 2 GERAÇÃO", category: "OUTROS", lote2: 2, quantity: 2, salePrice: 280, costPrice: 200 },
+      { name: "ECHO DOTS 5 GER PRETA", category: "OUTROS", lote2: 1, quantity: 1, salePrice: 450, costPrice: 330 },
+      { name: "JBL FLIP 7 AZUL", category: "OUTROS", lote2: 1, quantity: 1, salePrice: 550, costPrice: 410 },
+      { name: "JBL FLIP 7 PRETO", category: "OUTROS", lote2: 1, quantity: 1, salePrice: 550, costPrice: 410 },
+      { name: "Relógio Redmi Watch 5 Active preto", category: "RELOGIO", lote2: 1, quantity: 1, salePrice: 260, costPrice: 185 },
       // Perfumes (Aba "perfumes" - todos os itens reais da planilha)
       { name: "Perfume Al Wataniah Sabah Al Ward Women Edp 100ML", category: "PERFUME_FEMININO", lote2: 1, quantity: 1, salePrice: 135, costPrice: 93.5, costDollar: 17, dollarRate: 5.5 },
       { name: "Perfume Feminino Maison Alhambra Candid Pour Femme Edp 100 ML", category: "PERFUME_FEMININO", lote2: 1, quantity: 1, salePrice: 143, costPrice: 104.5, costDollar: 19, dollarRate: 5.5 },
@@ -168,6 +186,29 @@ export async function ensureInitialSeed(): Promise<void> {
 
     for (const prod of initialStock) {
       await prisma.product.create({ data: prod });
+    }
+  } else {
+    // Migra automaticamente categorias legadas ("ACESSORIO") para "FONE", "RELOGIO" e "OUTROS"
+    const legacyProducts = await prisma.product.findMany({
+      where: { category: "ACESSORIO" }
+    });
+    for (const lp of legacyProducts) {
+      const upperName = lp.name.toUpperCase();
+      let newCat = "OUTROS";
+      if (upperName.includes("FONE") || upperName.includes("BUDS") || upperName.includes("AIRPODS")) {
+        newCat = "FONE";
+      } else if (
+        upperName.includes("RELÓGIO") ||
+        upperName.includes("RELOGIO") ||
+        upperName.includes("WATCH") ||
+        upperName.includes("SMARTWATCH")
+      ) {
+        newCat = "RELOGIO";
+      }
+      await prisma.product.update({
+        where: { id: lp.id },
+        data: { category: newCat }
+      });
     }
   }
 

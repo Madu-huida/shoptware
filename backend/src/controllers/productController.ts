@@ -42,8 +42,17 @@ export const productController = {
 
           if (item.category === "CELULAR") {
             acc.totalCellphones += item.quantity;
+          } else if (item.category === "RELOGIO") {
+            acc.totalWatches += item.quantity;
+          } else if (item.category === "FONE") {
+            acc.totalEarphones += item.quantity;
+          } else if (item.category.startsWith("PERFUME")) {
+            acc.totalPerfumes += item.quantity;
           } else if (item.category === "PECA") {
             acc.totalPieces += item.quantity;
+            acc.totalOthers += item.quantity;
+          } else {
+            acc.totalOthers += item.quantity;
           }
 
           return acc;
@@ -51,6 +60,10 @@ export const productController = {
         {
           totalQuantity: 0,
           totalCellphones: 0,
+          totalWatches: 0,
+          totalEarphones: 0,
+          totalPerfumes: 0,
+          totalOthers: 0,
           totalPieces: 0,
           totalLote1: 0,
           totalLote2: 0,

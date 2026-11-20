@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -13,8 +13,8 @@ import {
   Bell,
   X,
   Lock,
-  Unlock,
-  KeyRound
+  LogOut,
+  ShieldCheck
 } from "lucide-react";
 import { useRealtime } from "../context/RealtimeContext";
 import { apiFetch, getStoredAdminPin, setStoredAdminPin } from "../lib/api";
@@ -25,11 +25,11 @@ const PC_NAV_ITEMS = [
   { to: "/estoque", label: "Estoque", icon: Package },
   { to: "/financeiro", label: "Financeiro", icon: Wallet },
   { to: "/despesas", label: "Despesas", icon: Receipt },
-  { to: "/pdv", label: "PDV Celular", icon: Smartphone }
+  { to: "/pdv", label: "Vendas do Dia", icon: Smartphone }
 ];
 
 const MOBILE_NAV_ITEMS = [
-  { to: "/pdv", label: "PDV (Registrar Venda)", icon: Smartphone, end: false },
+  { to: "/pdv", label: "Vendas do Dia", icon: Smartphone, end: false },
   { to: "/estoque", label: "Consultar Estoque", icon: Package, end: false }
 ];
 
@@ -46,43 +46,67 @@ export const Layout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const pinDialogRef = useRef<HTMLDialogElement>(null);
-  const [pinUnlocked, setPinUnlocked] = useState<boolean>(() => Boolean(getStoredAdminPin()));
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [checkingStoredPin, setCheckingStoredPin] = useState<boolean>(true);
   const [pinInput, setPinInput] = useState<string>("");
   const [pinError, setPinError] = useState<string | null>(null);
   const [verifyingPin, setVerifyingPin] = useState<boolean>(false);
 
-  const openPinModal = () => {
-    setPinInput("");
-    setPinError(null);
-    pinDialogRef.current?.showModal();
-  };
+  // Ao abrir o sistema, verifica se já existe uma sessão autenticada válida com a senha atual
+  useEffect(() => {
+    let active = true;
+    async function checkInitialAuth() {
+      const storedPin = getStoredAdminPin();
+      if (!storedPin) {
+        if (active) {
+          setIsAuthenticated(false);
+          setCheckingStoredPin(false);
+        }
+        return;
+      }
 
-  const closePinModal = () => {
-    pinDialogRef.current?.close();
-  };
+      try {
+        const res = await apiFetch<{ valid: boolean }>("/auth/verify-pin", {
+          method: "POST",
+          body: JSON.stringify({ pin: storedPin })
+        });
+        if (!active) return;
+        if (res.valid) {
+          setIsAuthenticated(true);
+        } else {
+          setStoredAdminPin("");
+          setIsAuthenticated(false);
+        }
+      } catch {
+        if (!active) return;
+        setStoredAdminPin("");
+        setIsAuthenticated(false);
+      } finally {
+        if (active) {
+          setCheckingStoredPin(false);
+        }
+      }
+    }
+    checkInitialAuth();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleToggleDevice = (mode: "PC" | "MOBILE") => {
-    if (mode === "MOBILE") {
-      setStoredAdminPin("");
-      setPinUnlocked(false);
-      setDeviceMode("MOBILE");
-      if (location.pathname !== "/pdv") {
-        navigate("/pdv");
-      }
-      return;
-    }
-
-    // Para entrar ou desbloquear o modo PC Admin, exige validação do PIN
-    if (!getStoredAdminPin()) {
-      openPinModal();
-      return;
-    }
-
-    setDeviceMode("PC");
-    if (location.pathname === "/pdv") {
+    setDeviceMode(mode);
+    if (mode === "MOBILE" && location.pathname !== "/pdv") {
+      navigate("/pdv");
+    } else if (mode === "PC" && location.pathname === "/pdv") {
       navigate("/");
     }
+  };
+
+  const handleLockSystem = () => {
+    setStoredAdminPin("");
+    setIsAuthenticated(false);
+    setPinInput("");
+    setPinError(null);
   };
 
   const handleVerifyPinSubmit = async (e: React.FormEvent) => {
@@ -93,27 +117,151 @@ export const Layout: React.FC = () => {
     setPinError(null);
 
     try {
+      const cleanPin = pinInput.trim();
       const res = await apiFetch<{ valid: boolean }>("/auth/verify-pin", {
         method: "POST",
-        body: JSON.stringify({ pin: pinInput.trim() })
+        body: JSON.stringify({ pin: cleanPin })
       });
 
       if (res.valid) {
-        setStoredAdminPin(pinInput.trim());
-        setPinUnlocked(true);
-        setDeviceMode("PC");
-        closePinModal();
+        setStoredAdminPin(cleanPin);
+        setIsAuthenticated(true);
+        setPinInput("");
         triggerManualSync();
-        if (location.pathname === "/pdv") {
-          navigate("/");
+        if (deviceMode === "MOBILE" && location.pathname !== "/pdv") {
+          navigate("/pdv");
         }
       }
     } catch (err) {
-      setPinError(err instanceof Error ? err.message : "PIN de Administrador incorreto.");
+      setPinError(err instanceof Error ? err.message : "Senha incorreta. Tente novamente.");
     } finally {
       setVerifyingPin(false);
     }
   };
+
+  if (checkingStoredPin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-emerald-950 text-white p-4">
+        <div className="text-center space-y-2">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-600 flex items-center justify-center mx-auto animate-pulse">
+            <Lock className="w-6 h-6 text-white" />
+          </div>
+          <p className="text-sm font-semibold text-emerald-100">
+            Verificando autenticação do sistema...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Tela de Bloqueio / Login Obrigatória antes de renderizar qualquer rota ou dado
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-800 text-slate-900 p-4">
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-emerald-200 overflow-hidden">
+          <div className="bg-emerald-900 text-white p-6 text-center space-y-2">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-600 flex items-center justify-center mx-auto shadow-inner border border-emerald-400/40">
+              <ShieldCheck className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-xl font-extrabold tracking-tight">SHOPTWARE • BIGSHOP</h1>
+            <p className="text-xs text-emerald-200">
+              Acesso Restrito — Digite a senha de segurança para entrar no sistema
+            </p>
+          </div>
+
+          <form
+            onSubmit={handleVerifyPinSubmit}
+            aria-labelledby="site-login-heading"
+            className="p-6 space-y-5"
+          >
+            <div>
+              <span
+                id="site-login-heading"
+                className="block text-xs font-bold uppercase text-slate-600 mb-2 text-center"
+              >
+                1. Escolha o Modo de Acesso
+              </span>
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setDeviceMode("PC")}
+                  className={`py-3 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                    deviceMode === "PC"
+                      ? "bg-emerald-600 border-emerald-600 text-white shadow-sm"
+                      : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-emerald-50"
+                  }`}
+                >
+                  <Monitor className="w-4 h-4" />
+                  <span>PC Admin</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeviceMode("MOBILE")}
+                  className={`py-3 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                    deviceMode === "MOBILE"
+                      ? "bg-emerald-600 border-emerald-600 text-white shadow-sm"
+                      : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-emerald-50"
+                  }`}
+                >
+                  <Smartphone className="w-4 h-4" />
+                  <span>Celular / Vendas</span>
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="site-entry-password"
+                className="block text-xs font-bold uppercase text-slate-700 mb-1.5 text-center"
+              >
+                2. Senha do Sistema *
+              </label>
+              <input
+                id="site-entry-password"
+                name="sitePassword"
+                type="password"
+                inputMode="numeric"
+                autoComplete="current-password"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                enterKeyHint="done"
+                autoFocus
+                required
+                value={pinInput}
+                onChange={(e) => {
+                  setPinInput(e.target.value);
+                  if (pinError) setPinError(null);
+                }}
+                placeholder="••••••"
+                aria-invalid={pinError ? "true" : undefined}
+                aria-describedby={pinError ? "site-login-error" : undefined}
+                className="w-full border-2 border-emerald-300 focus:border-emerald-600 rounded-xl px-4 py-3 text-lg font-extrabold tracking-widest text-center bg-emerald-50/30"
+              />
+            </div>
+
+            {pinError && (
+              <div
+                id="site-login-error"
+                role="alert"
+                className="bg-rose-50 border border-rose-200 text-rose-800 px-3.5 py-2.5 rounded-xl text-xs font-bold text-center"
+              >
+                {pinError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={verifyingPin}
+              className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-extrabold text-sm shadow-md transition cursor-pointer"
+            >
+              {verifyingPin ? "Verificando Senha..." : "Desbloquear e Entrar"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-emerald-50/40 text-slate-900">
@@ -164,7 +312,7 @@ export const Layout: React.FC = () => {
               )}
             </div>
 
-            {/* Seletor de Modo (PC Admin com PIN vs Celular PDV) */}
+            {/* Seletor de Modo (PC Admin vs Celular Vendas do Dia) e Botão Bloquear */}
             <div className="inline-flex items-center rounded-lg bg-emerald-950/70 p-1 border border-emerald-700/60 gap-1">
               <button
                 type="button"
@@ -177,11 +325,6 @@ export const Layout: React.FC = () => {
               >
                 <Monitor className="w-3.5 h-3.5" />
                 <span>PC Admin</span>
-                {pinUnlocked ? (
-                  <Unlock className="w-3 h-3 text-emerald-200" />
-                ) : (
-                  <Lock className="w-3 h-3 text-amber-300" />
-                )}
               </button>
               <button
                 type="button"
@@ -193,19 +336,17 @@ export const Layout: React.FC = () => {
                 }`}
               >
                 <Smartphone className="w-3.5 h-3.5" />
-                <span>Celular PDV</span>
+                <span>Vendas do Dia</span>
               </button>
-              {deviceMode === "PC" && !pinUnlocked && (
-                <button
-                  type="button"
-                  onClick={openPinModal}
-                  title="Desbloquear PIN de Administrador para ajuste de estoque"
-                  className="flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500 hover:bg-amber-400 text-amber-950 text-[11px] font-bold transition cursor-pointer"
-                >
-                  <KeyRound className="w-3 h-3" />
-                  <span>Destravar PIN</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleLockSystem}
+                title="Bloquear sistema e voltar para a tela de senha"
+                className="flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-900 hover:bg-rose-800 text-emerald-200 hover:text-white text-[11px] font-bold transition cursor-pointer"
+              >
+                <LogOut className="w-3 h-3" />
+                <span>Bloquear</span>
+              </button>
             </div>
           </div>
         </div>
@@ -266,106 +407,9 @@ export const Layout: React.FC = () => {
       <footer className="bg-white border-t border-emerald-100 py-3 px-4 text-center text-xs text-slate-500">
         Shoptware PWA • BigShop Importados (CNPJ 47.891.653/0001-71) • Modo Atual:{" "}
         <strong className="text-emerald-700">
-          {deviceMode === "PC"
-            ? `Computador (${pinUnlocked ? "PIN Admin Ativo" : "PIN Bloqueado"})`
-            : "Celular (PDV & Visualização)"}
+          {deviceMode === "PC" ? "Computador (PC Admin Autenticado)" : "Celular (Vendas do Dia)"}
         </strong>
       </footer>
-
-      {/* Modal Nativo de PIN de Administrador (modern-web-guidance: dialog) */}
-      <dialog
-        ref={pinDialogRef}
-        aria-labelledby="admin-pin-dialog-title"
-        className="m-auto rounded-2xl border border-emerald-200 bg-white p-6 text-slate-900 shadow-2xl max-w-sm w-full"
-      >
-        <div className="space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center">
-                <Lock className="w-4 h-4" />
-              </div>
-              <div>
-                <h2 id="admin-pin-dialog-title" className="text-base font-bold text-slate-900">
-                  PIN de Administrador (PC)
-                </h2>
-                <p className="text-[11px] text-slate-500">
-                  Proteção contra alteração de estoque pelo celular
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={closePinModal}
-              aria-label="Fechar modal de PIN"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <form onSubmit={handleVerifyPinSubmit} className="space-y-4">
-            <div>
-              <label
-                htmlFor="admin-pin-input"
-                className="block text-xs font-bold text-slate-700 mb-1.5"
-              >
-                Digite o PIN do Computador da Loja *
-              </label>
-              <input
-                id="admin-pin-input"
-                name="adminPin"
-                type="password"
-                inputMode="numeric"
-                autoComplete="current-password"
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                enterKeyHint="done"
-                required
-                value={pinInput}
-                onChange={(e) => {
-                  setPinInput(e.target.value);
-                  if (pinError) setPinError(null);
-                }}
-                placeholder="PIN padrão: 1234"
-                aria-invalid={pinError ? "true" : undefined}
-                aria-describedby={pinError ? "admin-pin-error" : "admin-pin-hint"}
-                className="w-full border border-emerald-300 rounded-xl px-3.5 py-2.5 text-base font-bold tracking-widest text-center"
-              />
-              <p id="admin-pin-hint" className="text-[11px] text-slate-500 mt-1 text-center">
-                Configurável em ADMIN_PIN no arquivo .env do servidor (padrão 1234).
-              </p>
-            </div>
-
-            {pinError && (
-              <div
-                id="admin-pin-error"
-                role="alert"
-                className="bg-rose-50 border border-rose-200 text-rose-800 px-3 py-2 rounded-xl text-xs font-semibold text-center"
-              >
-                {pinError}
-              </div>
-            )}
-
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={closePinModal}
-                className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                disabled={verifyingPin}
-                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm cursor-pointer"
-              >
-                {verifyingPin ? "Verificando..." : "Desbloquear PC Admin"}
-              </button>
-            </div>
-          </form>
-        </div>
-      </dialog>
     </div>
   );
 };

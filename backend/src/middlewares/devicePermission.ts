@@ -1,12 +1,32 @@
 import { Request, Response, NextFunction } from "express";
 
 export function getExpectedAdminPin(): string {
-  return (process.env.ADMIN_PIN || "1234").trim();
+  return (process.env.ADMIN_PIN || "122124").trim();
+}
+
+/**
+ * Middleware Global: Exige a senha única do sistema ("122124") em todas as rotas de dados,
+ * permitindo acesso apenas após desbloquear a tela de entrada (tanto no PC quanto no Celular).
+ */
+export function requireSiteAuth(req: Request, res: Response, next: NextFunction): void {
+  const pinFromHeader = ((req.headers["x-admin-pin"] as string) || "").trim();
+  const pinFromQuery = req.query?.pin !== undefined ? String(req.query.pin).trim() : "";
+  const providedPin = pinFromHeader || pinFromQuery;
+  const expectedPin = getExpectedAdminPin();
+
+  if (!providedPin || providedPin !== expectedPin) {
+    res.status(401).json({
+      error: "Acesso bloqueado: Informe a senha do sistema (122124) para acessar os dados."
+    });
+    return;
+  }
+
+  next();
 }
 
 /**
  * Regra de Negócio: O ajuste manual de estoque SÓ PODE ser feito no Computador (PC)
- * mediante validação do PIN de Administrador no header `x-admin-pin`.
+ * mediante validação da senha/PIN de Administrador no header `x-admin-pin`.
  * O celular apenas visualiza o estoque e registra vendas (dando baixa automática).
  */
 export function requirePcForStockAdjustment(req: Request, res: Response, next: NextFunction): void {
@@ -23,7 +43,7 @@ export function requirePcForStockAdjustment(req: Request, res: Response, next: N
 
   if (!providedPin || providedPin !== expectedPin) {
     res.status(403).json({
-      error: "PIN de Administrador inválido ou ausente. Desbloqueie o modo PC Admin com o PIN para alterar o estoque."
+      error: "Senha de Administrador inválida ou ausente. Desbloqueie o sistema com a senha para alterar o estoque."
     });
     return;
   }
@@ -38,9 +58,9 @@ export function verifyAdminPin(req: Request, res: Response): void {
   const expectedPin = getExpectedAdminPin();
 
   if (candidate && candidate === expectedPin) {
-    res.json({ valid: true, message: "PIN de Administrador validado com sucesso." });
+    res.json({ valid: true, message: "Senha validada com sucesso." });
     return;
   }
 
-  res.status(401).json({ valid: false, error: "PIN de Administrador incorreto." });
+  res.status(401).json({ valid: false, error: "Senha incorreta. Tente novamente." });
 }
