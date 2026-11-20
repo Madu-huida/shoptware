@@ -120,3 +120,43 @@ dialog::backdrop {
   overscroll-behavior: contain;
   background-color: rgb(2 44 34 / 0.65);
 }
+
+/* Regras de Impressão Limpa para o Termo de Garantia (#printable-warranty) */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  header,
+  nav,
+  footer,
+  .no-print {
+    display: none !important;
+  }
+
+  main {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  #printable-warranty {
+    border: 1px solid #cbd5e1 !important;
+    box-shadow: none !important;
+    border-radius: 8px !important;
+    padding: 18px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    break-inside: avoid;
+  }
+}

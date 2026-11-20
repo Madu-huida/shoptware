@@ -8,6 +8,8 @@ import { EstoquePage } from "./pages/EstoquePage";
 import { FinanceiroPage } from "./pages/FinanceiroPage";
 import { DespesasPage } from "./pages/DespesasPage";
 import { PdvMobilePage } from "./pages/PdvMobilePage";
+import { TaxasPage } from "./pages/TaxasPage";
+import { GarantiaPage } from "./pages/GarantiaPage";
 
 export const App: React.FC = () => {
   return (
@@ -20,6 +22,8 @@ export const App: React.FC = () => {
             <Route path="estoque" element={<EstoquePage />} />
             <Route path="financeiro" element={<FinanceiroPage />} />
             <Route path="despesas" element={<DespesasPage />} />
+            <Route path="taxas" element={<TaxasPage />} />
+            <Route path="garantia" element={<GarantiaPage />} />
             <Route path="pdv" element={<PdvMobilePage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

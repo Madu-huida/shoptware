@@ -14,7 +14,8 @@ import {
   X,
   Lock,
   LogOut,
-  ShieldCheck
+  ShieldCheck,
+  Calculator
 } from "lucide-react";
 import { useRealtime } from "../context/RealtimeContext";
 import { apiFetch, getStoredAdminPin, setStoredAdminPin } from "../lib/api";
@@ -25,12 +26,16 @@ const PC_NAV_ITEMS = [
   { to: "/estoque", label: "Estoque", icon: Package },
   { to: "/financeiro", label: "Financeiro", icon: Wallet },
   { to: "/despesas", label: "Despesas", icon: Receipt },
+  { to: "/taxas", label: "Taxas", icon: Calculator },
+  { to: "/garantia", label: "Garantia", icon: ShieldCheck },
   { to: "/pdv", label: "Vendas do Dia", icon: Smartphone }
 ];
 
 const MOBILE_NAV_ITEMS = [
   { to: "/pdv", label: "Vendas do Dia", icon: Smartphone, end: false },
-  { to: "/estoque", label: "Consultar Estoque", icon: Package, end: false }
+  { to: "/estoque", label: "Consultar Estoque", icon: Package, end: false },
+  { to: "/taxas", label: "Taxas", icon: Calculator, end: false },
+  { to: "/garantia", label: "Garantia", icon: ShieldCheck, end: false }
 ];
 
 export const Layout: React.FC = () => {

@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  Smartphone,
   ShoppingCart,
   Package,
   Search,
@@ -9,26 +8,18 @@ import {
   RotateCcw,
   Wifi,
   Calculator,
-  MapPin,
-  CreditCard
+  CreditCard,
+  CalendarDays
 } from "lucide-react";
 import { apiFetch, formatBRL, formatDateBR, toISODateInput } from "../lib/api";
 import { useRealtime } from "../context/RealtimeContext";
-import { ProductRecord } from "./EstoquePage";
+import { ProductRecord, getProductCategoryGroup } from "./EstoquePage";
 import { SaleRecord } from "./VendasPage";
-
-const QUICK_NEIGHBORHOODS = [
-  "LOCAL",
-  "ITINGA",
-  "JARIVATUBA",
-  "COMASA",
-  "PARAISO",
-  "COSTA E SILVA",
-  "ARAQUARI",
-  "AMERICA",
-  "GUANABARA",
-  "PIRABEIRABA"
-];
+import {
+  AutocompleteOption,
+  GoogleAutocomplete,
+  JOINVILLE_NEIGHBORHOODS
+} from "../components/GoogleAutocomplete";
 
 const QUICK_DELIVERY_FEES = [0, 20, 22, 26, 30, 36, 44];
 
@@ -66,12 +57,12 @@ export const PdvMobilePage: React.FC = () => {
   const [daySales, setDaySales] = useState<SaleRecord[]>([]);
   const [selectedDay, setSelectedDay] = useState<string>(toISODateInput());
 
-  // Busca de produto no PDV
+  // Busca de produto no catálogo lateral
   const [productSearch, setProductSearch] = useState("");
   const [onlyInStock, setOnlyInStock] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState("ALL");
 
-  // Campos de Registro de Venda Mobile
+  // Campos de Registro de Venda do Dia
   const [selectedProduct, setSelectedProduct] = useState<ProductRecord | null>(null);
   const [customProductName, setCustomProductName] = useState("");
   const [quantity, setQuantity] = useState("1");
@@ -92,29 +83,31 @@ export const PdvMobilePage: React.FC = () => {
     text: string;
   } | null>(null);
 
-  // Simulador rápido no celular
+  // Simulador rápido
   const [simAmount, setSimAmount] = useState("1550");
   const [simulations, setSimulations] = useState<SimulationItem[]>([]);
 
   useEffect(() => {
     let active = true;
     async function loadPdvData() {
-      try {
-        const [prodRes, salesRes, simRes] = await Promise.all([
-          apiFetch<{ products: ProductRecord[] }>("/products?active=true", {}, "MOBILE"),
-          apiFetch<{ sales: SaleRecord[] }>(`/sales?date=${selectedDay}`, {}, "MOBILE"),
-          apiFetch<{ simulations: SimulationItem[] }>(
-            `/financial/card-fees/simulate?saleValue=${simAmount}&downPayment=0`,
-            {},
-            "MOBILE"
-          )
-        ]);
-        if (!active) return;
-        setProducts(prodRes.products);
-        setDaySales(salesRes.sales);
-        setSimulations(simRes.simulations);
-      } catch (err) {
-        console.error("Erro ao carregar dados do PDV Mobile:", err);
+      const [prodSettled, salesSettled, simSettled] = await Promise.allSettled([
+        apiFetch<{ products: ProductRecord[] }>("/products?active=true"),
+        apiFetch<{ sales: SaleRecord[] }>(`/sales?date=${selectedDay}`),
+        apiFetch<{ simulations: SimulationItem[] }>(
+          `/financial/card-fees/simulate?saleValue=${Number(simAmount) || 1550}&downPayment=0`
+        )
+      ]);
+
+      if (!active) return;
+
+      if (prodSettled.status === "fulfilled") {
+        setProducts(prodSettled.value.products || []);
+      }
+      if (salesSettled.status === "fulfilled") {
+        setDaySales(salesSettled.value.sales || []);
+      }
+      if (simSettled.status === "fulfilled") {
+        setSimulations(simSettled.value.simulations || []);
       }
     }
     loadPdvData();
@@ -146,6 +139,32 @@ export const PdvMobilePage: React.FC = () => {
     }
   };
 
+  // Opções do Autocomplete Estilo Google para Produtos
+  const productAutocompleteOptions = useMemo<AutocompleteOption<ProductRecord>[]>(() => {
+    const sorted = [...products].sort((a, b) => b.quantity - a.quantity);
+    return sorted.map((p) => ({
+      id: p.id,
+      label: p.name,
+      sublabel: `${getProductCategoryGroup(p.category)} • Saldo: ${p.quantity} un.`,
+      badgeText: `${formatBRL(p.salePrice)} (${p.quantity} un.)`,
+      badgeColor:
+        p.quantity > 0 ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600",
+      data: p
+    }));
+  }, [products]);
+
+  // Opções do Autocomplete Estilo Google para Todos os Bairros de Joinville - SC
+  const neighborhoodAutocompleteOptions = useMemo<AutocompleteOption<string>[]>(() => {
+    return JOINVILLE_NEIGHBORHOODS.map((b) => ({
+      id: b,
+      label: b,
+      sublabel: b === "LOCAL" ? "Retirada na Loja BigShop" : "Joinville / Região - SC",
+      badgeText: b === "LOCAL" ? "Loja" : "Bairro",
+      badgeColor: "bg-emerald-50 text-emerald-800",
+      data: b
+    }));
+  }, []);
+
   const handleRegisterMobileSale = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting) return;
@@ -173,41 +192,35 @@ export const PdvMobilePage: React.FC = () => {
           ? selectedProduct.salePrice * (Number(quantity) || 1)
           : 0;
 
-      await apiFetch(
-        "/sales",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            saleDate: `${selectedDay}T12:00:00.000Z`,
-            neighborhood: neighborhood.trim().toUpperCase() || "LOCAL",
-            quantity: Number(quantity) || 1,
-            productId: selectedProduct ? selectedProduct.id : null,
-            productName: finalProductName,
-            grossValue: parsedGross,
-            secondaryNetValue: parsedSecondaryNet,
-            secondaryPaymentMethod:
-              showSecondPayment && parsedSecondaryNet > 0
-                ? secondaryPaymentMethod.trim().toUpperCase()
-                : null,
-            netSaleValue: parsedNet,
-            stockValue: parsedStock,
-            extraValue: 0,
-            deliveryFee: Number(deliveryFee) || 0,
-            paymentMethod,
-            cooperValue: Number(cooperValue) || 0,
-            ricocheteValue: 0,
-            originDevice: "MOBILE"
-          })
-        },
-        "MOBILE"
-      );
+      await apiFetch("/sales", {
+        method: "POST",
+        body: JSON.stringify({
+          saleDate: `${selectedDay}T12:00:00.000Z`,
+          neighborhood: neighborhood.trim().toUpperCase() || "LOCAL",
+          quantity: Number(quantity) || 1,
+          productId: selectedProduct ? selectedProduct.id : null,
+          productName: finalProductName,
+          grossValue: parsedGross,
+          secondaryNetValue: parsedSecondaryNet,
+          secondaryPaymentMethod:
+            showSecondPayment && parsedSecondaryNet > 0
+              ? secondaryPaymentMethod.trim().toUpperCase()
+              : null,
+          netSaleValue: parsedNet,
+          stockValue: parsedStock,
+          extraValue: 0,
+          deliveryFee: Number(deliveryFee) || 0,
+          paymentMethod,
+          cooperValue: Number(cooperValue) || 0,
+          ricocheteValue: 0
+        })
+      });
 
       setStatusMessage({
         type: "success",
-        text: `Venda de "${finalProductName}" registrada! Baixa no estoque e atualização no PC enviadas em tempo real.`
+        text: `Venda de "${finalProductName}" registrada! Baixa no estoque e sincronização em tempo real concluídas.`
       });
 
-      // Limpa campos para a próxima venda
       setSelectedProduct(null);
       setCustomProductName("");
       setQuantity("1");
@@ -239,7 +252,7 @@ export const PdvMobilePage: React.FC = () => {
     }
 
     try {
-      await apiFetch(`/sales/${sale.id}/cancel`, { method: "POST" }, "MOBILE");
+      await apiFetch(`/sales/${sale.id}/cancel`, { method: "POST" });
       setStatusMessage({
         type: "success",
         text: `Venda cancelada. "${sale.productName}" retornou ao estoque.`
@@ -255,9 +268,8 @@ export const PdvMobilePage: React.FC = () => {
 
   const filteredProducts = products.filter((p) => {
     if (onlyInStock && p.quantity <= 0) return false;
-    if (categoryFilter === "CELULAR" && p.category !== "CELULAR") return false;
-    if (categoryFilter === "ACESSORIO" && p.category !== "ACESSORIO") return false;
-    if (categoryFilter === "PERFUME" && !p.category.startsWith("PERFUME")) return false;
+    const group = getProductCategoryGroup(p.category);
+    if (categoryFilter !== "ALL" && group !== categoryFilter) return false;
     if (productSearch && !p.name.toLowerCase().includes(productSearch.toLowerCase())) return false;
     return true;
   });
@@ -285,23 +297,37 @@ export const PdvMobilePage: React.FC = () => {
   );
 
   return (
-    <div className="max-w-xl mx-auto space-y-4 pb-8">
-      {/* Cabeçalho Compacto Mobile PDV */}
-      <div className="bg-gradient-to-r from-emerald-900 to-emerald-700 text-white rounded-2xl p-4 shadow-md flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center">
-            <Smartphone className="w-6 h-6 text-emerald-200" />
+    <div className="w-full space-y-5 pb-8">
+      {/* Cabeçalho Fluido Responsivo — Vendas do Dia */}
+      <div className="bg-gradient-to-r from-emerald-900 to-emerald-700 text-white rounded-2xl p-5 shadow-md flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center">
+            <CalendarDays className="w-6 h-6 text-emerald-200" />
           </div>
           <div>
-            <h2 className="text-base sm:text-lg font-extrabold">PDV Mobile • BigShop</h2>
+            <h2 className="text-lg sm:text-xl font-extrabold">Vendas do Dia • BigShop</h2>
             <p className="text-xs text-emerald-100">
-              Baixa no SQLite e sincronização instantânea com o PC
+              Registro rápido com baixa automática no estoque e sincronização em tempo real
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/60 border border-emerald-400/30 text-[11px] font-semibold">
-          <Wifi className={`w-3.5 h-3.5 ${connected ? "text-emerald-400" : "text-rose-400"}`} />
-          <span>{connected ? "Online" : "Offline"}</span>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 bg-emerald-950/50 border border-emerald-500/30 px-3 py-1.5 rounded-xl text-xs">
+            <span className="text-emerald-200">Data:</span>
+            <input
+              type="date"
+              value={selectedDay}
+              onChange={(e) => setSelectedDay(e.target.value)}
+              aria-label="Data das vendas do dia"
+              className="bg-transparent text-white font-bold focus:outline-none"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-950/60 border border-emerald-400/30 text-xs font-semibold">
+            <Wifi className={`w-3.5 h-3.5 ${connected ? "text-emerald-400" : "text-rose-400"}`} />
+            <span>{connected ? "Online" : "Offline"}</span>
+          </div>
         </div>
       </div>
 
@@ -310,7 +336,7 @@ export const PdvMobilePage: React.FC = () => {
         <div
           role="status"
           aria-live="polite"
-          className={`p-3.5 rounded-xl border text-xs sm:text-sm font-semibold flex items-center gap-2 ${
+          className={`p-4 rounded-xl border text-xs sm:text-sm font-semibold flex items-center gap-2 ${
             statusMessage.type === "success"
               ? "bg-emerald-50 border-emerald-300 text-emerald-900"
               : "bg-rose-50 border-rose-300 text-rose-900"
@@ -321,18 +347,18 @@ export const PdvMobilePage: React.FC = () => {
         </div>
       )}
 
-      {/* Abas de Navegação do Celular */}
+      {/* Abas de Navegação de Vendas do Dia */}
       <div
         role="tablist"
-        aria-label="Opções do PDV Mobile"
-        className="grid grid-cols-3 bg-white rounded-xl p-1 border border-emerald-200 shadow-sm"
+        aria-label="Opções de Vendas do Dia"
+        className="grid grid-cols-3 bg-white rounded-xl p-1.5 border border-emerald-200 shadow-sm"
       >
         <button
           type="button"
           role="tab"
           aria-selected={mobileTab === "VENDER"}
           onClick={() => setMobileTab("VENDER")}
-          className={`py-2.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`py-2.5 px-3 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-2 cursor-pointer ${
             mobileTab === "VENDER"
               ? "bg-emerald-600 text-white shadow-sm"
               : "text-slate-600 hover:text-slate-900"
@@ -347,14 +373,14 @@ export const PdvMobilePage: React.FC = () => {
           role="tab"
           aria-selected={mobileTab === "HISTORICO"}
           onClick={() => setMobileTab("HISTORICO")}
-          className={`py-2.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`py-2.5 px-3 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-2 cursor-pointer ${
             mobileTab === "HISTORICO"
               ? "bg-emerald-600 text-white shadow-sm"
               : "text-slate-600 hover:text-slate-900"
           }`}
         >
           <Bike className="w-4 h-4" />
-          <span>Vendas Dia ({dayTotals.qty})</span>
+          <span>Vendas de Hoje ({dayTotals.qty})</span>
         </button>
 
         <button
@@ -362,27 +388,27 @@ export const PdvMobilePage: React.FC = () => {
           role="tab"
           aria-selected={mobileTab === "ESTOQUE"}
           onClick={() => setMobileTab("ESTOQUE")}
-          className={`py-2.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`py-2.5 px-3 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-2 cursor-pointer ${
             mobileTab === "ESTOQUE"
               ? "bg-emerald-600 text-white shadow-sm"
               : "text-slate-600 hover:text-slate-900"
           }`}
         >
           <Package className="w-4 h-4" />
-          <span>Estoque & Taxas</span>
+          <span>Estoque & Simulador</span>
         </button>
       </div>
 
       {/* ========================================================================== */}
-      {/* ABA 1: REGISTRAR VENDA NO CELULAR */}
+      {/* ABA 1: REGISTRAR VENDA (LAYOUT 100% RESPONSIVO: 2 COLUNAS NO PC, 1 NO CEL) */}
       {/* ========================================================================== */}
       {mobileTab === "VENDER" && (
-        <div className="space-y-4">
-          {/* Passo 1: Escolher Produto do Estoque */}
-          <div className="bg-white rounded-2xl p-4 border border-emerald-100 shadow-sm space-y-3">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Coluna Esquerda (5 cols no PC): Catálogo Rápido de Produtos Disponíveis */}
+          <div className="lg:col-span-5 bg-white rounded-2xl p-5 border border-emerald-100 shadow-sm space-y-3.5">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-emerald-950">
-                1. Selecionar Produto do Estoque
+                1. Catálogo de Produtos em Estoque
               </h3>
               <label
                 htmlFor="pdv-only-in-stock"
@@ -395,7 +421,7 @@ export const PdvMobilePage: React.FC = () => {
                   checked={onlyInStock}
                   onChange={(e) => setOnlyInStock(e.target.checked)}
                 />
-                <span>Com saldo ({filteredProducts.length})</span>
+                <span>Disponíveis ({filteredProducts.length})</span>
               </label>
             </div>
 
@@ -412,8 +438,8 @@ export const PdvMobilePage: React.FC = () => {
                   autoCapitalize="none"
                   spellCheck={false}
                   enterKeyHint="search"
-                  placeholder="Buscar Redmi, Poco, Fire Stick, JBL, Perfume..."
-                  className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl text-base"
+                  placeholder="Filtrar Redmi, Poco, Relógio, Fone, Perfume..."
+                  className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl text-sm"
                 />
               </div>
             </search>
@@ -422,8 +448,10 @@ export const PdvMobilePage: React.FC = () => {
               {[
                 { id: "ALL", label: "Todos" },
                 { id: "CELULAR", label: "Celulares" },
-                { id: "ACESSORIO", label: "Acessórios" },
-                { id: "PERFUME", label: "Perfumes" }
+                { id: "RELOGIO", label: "Relógios" },
+                { id: "FONE", label: "Fones" },
+                { id: "PERFUME", label: "Perfumes" },
+                { id: "OUTROS", label: "Outros" }
               ].map((cat) => (
                 <button
                   key={cat.id}
@@ -432,7 +460,7 @@ export const PdvMobilePage: React.FC = () => {
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer ${
                     categoryFilter === cat.id
                       ? "bg-emerald-700 text-white"
-                      : "bg-slate-100 text-slate-700"
+                      : "bg-slate-100 text-slate-700 hover:bg-emerald-50"
                   }`}
                 >
                   {cat.label}
@@ -441,10 +469,10 @@ export const PdvMobilePage: React.FC = () => {
             </div>
 
             {/* Lista de Toque Rápido de Produtos */}
-            <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl">
+            <div className="max-h-[420px] overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl">
               {filteredProducts.length === 0 ? (
-                <div className="p-4 text-center text-xs text-slate-400">
-                  Nenhum produto encontrado com esse filtro. Desmarque "Com saldo" ou digite abaixo.
+                <div className="p-6 text-center text-xs text-slate-400">
+                  Nenhum produto encontrado com esse filtro. Desmarque "Disponíveis" ou pesquise ao lado.
                 </div>
               ) : (
                 filteredProducts.map((p) => {
@@ -487,38 +515,47 @@ export const PdvMobilePage: React.FC = () => {
             </div>
           </div>
 
-          {/* Passo 2: Formulário de Valores, Entrega (Moto) e Pagamento */}
+          {/* Coluna Direita (7 cols no PC): Formulário de Venda com Autocomplete Estilo Google */}
           <form
             onSubmit={handleRegisterMobileSale}
             aria-labelledby="pdv-sale-form-heading"
-            className="bg-white rounded-2xl p-4 border border-emerald-100 shadow-sm space-y-4"
+            className="lg:col-span-7 bg-white rounded-2xl p-5 border border-emerald-100 shadow-sm space-y-4"
           >
-            <h3 id="pdv-sale-form-heading" className="text-sm font-bold text-emerald-950">
-              2. Dados da Venda & Taxa de Entrega
-            </h3>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 id="pdv-sale-form-heading" className="text-sm sm:text-base font-bold text-emerald-950">
+                2. Dados da Venda, Bairro & Taxa de Entrega
+              </h3>
+              {selectedProduct && (
+                <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
+                  Vinculado ao Estoque (Saldo: {selectedProduct.quantity} un.)
+                </span>
+              )}
+            </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2">
-                <label
-                  htmlFor="pdv-product-name"
-                  className="block text-xs font-bold text-slate-700 mb-1"
-                >
-                  Produto Vendido *
-                </label>
-                <input
+            {/* Produto Vendido (Autocomplete Estilo Google) + Quantidade */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="sm:col-span-3">
+                <GoogleAutocomplete<ProductRecord>
                   id="pdv-product-name"
                   name="productName"
-                  type="text"
+                  label="Produto Vendido (Digite para buscar no estoque)"
                   required
+                  iconType="product"
                   value={customProductName}
-                  onChange={(e) => {
-                    setCustomProductName(e.target.value);
-                    if (selectedProduct && e.target.value !== selectedProduct.name) {
+                  onChange={(text) => {
+                    setCustomProductName(text);
+                    if (selectedProduct && text !== selectedProduct.name) {
                       setSelectedProduct(null);
                     }
                   }}
-                  placeholder="Selecione acima ou digite..."
-                  className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-base font-semibold"
+                  onSelectOption={(opt) => {
+                    if (opt.data) {
+                      handleSelectProductCard(opt.data);
+                    }
+                  }}
+                  options={productAutocompleteOptions}
+                  placeholder="Digite o modelo (ex: Redmi Note 17, Poco C85, Perfume...)"
+                  emptyMessage="Nenhum produto encontrado no estoque. Você pode registrar como item avulso."
                 />
               </div>
 
@@ -539,45 +576,26 @@ export const PdvMobilePage: React.FC = () => {
               </div>
             </div>
 
-            {/* Bairro / Local de Entrega */}
-            <div className="space-y-2">
-              <label
-                htmlFor="pdv-neighborhood"
-                className="flex items-center gap-1.5 text-xs font-bold text-slate-700"
-              >
-                <MapPin className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Bairro / Local da Entrega *</span>
-              </label>
-              <input
+            {/* Bairro / Localização (Autocomplete Estilo Google com todos os bairros de Joinville - SC) */}
+            <div>
+              <GoogleAutocomplete<string>
                 id="pdv-neighborhood"
                 name="neighborhood"
-                type="text"
+                label="Bairro / Local da Entrega (Joinville - SC)"
                 required
+                uppercase
+                iconType="location"
                 value={neighborhood}
-                onChange={(e) => setNeighborhood(e.target.value)}
-                placeholder="Ex: LOCAL, ITINGA, JARIVATUBA..."
-                className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-base uppercase font-semibold"
+                onChange={(text) => setNeighborhood(text.toUpperCase())}
+                onSelectOption={(opt) => setNeighborhood(String(opt.label).toUpperCase())}
+                options={neighborhoodAutocompleteOptions}
+                placeholder="Digite o bairro (ex: Itinga, Aventureiro, Costa e Silva, Comasa, Local...)"
+                emptyMessage="Bairro personalizado — será salvo como digitado."
               />
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-                {QUICK_NEIGHBORHOODS.map((b) => (
-                  <button
-                    key={b}
-                    type="button"
-                    onClick={() => setNeighborhood(b)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap cursor-pointer ${
-                      neighborhood.toUpperCase() === b
-                        ? "bg-emerald-600 text-white"
-                        : "bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    {b}
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* Valores: Valor Bruto, Valor Recebido (Vendas) e Valor Estoque */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label
                   htmlFor="pdv-gross-value"
@@ -620,6 +638,25 @@ export const PdvMobilePage: React.FC = () => {
                   onChange={(e) => setNetSaleValue(e.target.value)}
                   placeholder="Líquido recebido"
                   className="w-full border border-emerald-400 bg-emerald-50/40 rounded-xl px-3 py-2.5 text-base font-bold text-emerald-900"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="pdv-stock-value"
+                  className="block text-xs font-bold text-slate-700 mb-1"
+                >
+                  Valor Estoque (Tabela R$)
+                </label>
+                <input
+                  id="pdv-stock-value"
+                  name="stockValue"
+                  type="text"
+                  inputMode="decimal"
+                  value={stockValue}
+                  onChange={(e) => setStockValue(e.target.value)}
+                  placeholder="Ex: 1550"
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-base font-semibold text-slate-700"
                 />
               </div>
             </div>
@@ -665,7 +702,7 @@ export const PdvMobilePage: React.FC = () => {
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer ${
                       Number(deliveryFee) === fee
                         ? "bg-emerald-600 text-white"
-                        : "bg-slate-100 text-slate-700"
+                        : "bg-slate-100 text-slate-700 hover:bg-emerald-50"
                     }`}
                   >
                     {fee === 0 ? "Sem Moto (R$ 0)" : `R$ ${fee}`}
@@ -701,7 +738,7 @@ export const PdvMobilePage: React.FC = () => {
                     className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap cursor-pointer ${
                       paymentMethod.toUpperCase() === pm
                         ? "bg-emerald-600 text-white"
-                        : "bg-slate-100 text-slate-700"
+                        : "bg-slate-100 text-slate-700 hover:bg-emerald-50"
                     }`}
                   >
                     {pm}
@@ -812,10 +849,10 @@ export const PdvMobilePage: React.FC = () => {
       {/* ========================================================================== */}
       {mobileTab === "HISTORICO" && (
         <div className="space-y-4">
-          <div className="bg-white rounded-2xl p-4 border border-emerald-100 shadow-sm space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <label htmlFor="pdv-history-date" className="text-xs font-bold text-slate-700">
-                Data das Vendas:
+          <div className="bg-white rounded-2xl p-5 border border-emerald-100 shadow-sm space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label htmlFor="pdv-history-date" className="text-sm font-bold text-slate-800">
+                Data das Vendas do Dia:
               </label>
               <input
                 id="pdv-history-date"
@@ -827,29 +864,33 @@ export const PdvMobilePage: React.FC = () => {
               />
             </div>
 
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
-                <div className="text-[10px] font-bold uppercase text-emerald-800">Aparelhos</div>
-                <div className="text-base font-extrabold text-emerald-950">{dayTotals.qty}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                <div className="text-xs font-bold uppercase text-emerald-800">
+                  Aparelhos Vendidos
+                </div>
+                <div className="text-xl font-extrabold text-emerald-950">{dayTotals.qty}</div>
               </div>
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
-                <div className="text-[10px] font-bold uppercase text-emerald-800">Vendas Líq.</div>
-                <div className="text-base font-extrabold text-emerald-950">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                <div className="text-xs font-bold uppercase text-emerald-800">
+                  Vendas Líquidas (Dia)
+                </div>
+                <div className="text-xl font-extrabold text-emerald-950">
                   {formatBRL(dayTotals.net)}
                 </div>
               </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
-                <div className="text-[10px] font-bold uppercase text-slate-600">Total Moto</div>
-                <div className="text-base font-extrabold text-slate-900">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <div className="text-xs font-bold uppercase text-slate-600">Total Motoboy</div>
+                <div className="text-xl font-extrabold text-slate-900">
                   {formatBRL(dayTotals.moto)}
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="space-y-2.5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {daySales.length === 0 ? (
-              <div className="bg-white rounded-2xl p-6 text-center text-xs text-slate-400 border border-emerald-100">
+              <div className="md:col-span-2 bg-white rounded-2xl p-8 text-center text-sm text-slate-400 border border-emerald-100">
                 Nenhuma venda registrada em {formatDateBR(selectedDay)}.
               </div>
             ) : (
@@ -903,12 +944,12 @@ export const PdvMobilePage: React.FC = () => {
       )}
 
       {/* ========================================================================== */}
-      {/* ABA 3: CONSULTA DE ESTOQUE (SOMENTE LEITURA) & SIMULADOR DE PARCELAS */}
+      {/* ABA 3: CONSULTA DE ESTOQUE DISPONÍVEL & SIMULADOR DE PARCELAS */}
       {/* ========================================================================== */}
       {mobileTab === "ESTOQUE" && (
-        <div className="space-y-4">
-          {/* Simulador Rápido de Parcelas no Celular */}
-          <div className="bg-white rounded-2xl p-4 border border-emerald-100 shadow-sm space-y-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          {/* Simulador Rápido de Parcelas */}
+          <div className="bg-white rounded-2xl p-5 border border-emerald-100 shadow-sm space-y-3.5">
             <div className="flex items-center gap-2 text-emerald-900 font-bold text-sm">
               <Calculator className="w-4 h-4 text-emerald-600" />
               <span>Simulador Rápido de Maquininha (Aba TAXA)</span>
@@ -924,14 +965,14 @@ export const PdvMobilePage: React.FC = () => {
                 inputMode="decimal"
                 value={simAmount}
                 onChange={(e) => setSimAmount(e.target.value)}
-                className="w-full border border-emerald-400 rounded-xl px-3 py-2 text-base font-bold"
+                className="w-full border border-emerald-400 rounded-xl px-3.5 py-2 text-base font-bold"
               />
             </div>
-            <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl text-xs">
+            <div className="max-h-96 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl text-xs">
               {simulations.map((sim) => (
                 <div
                   key={sim.id}
-                  className="p-2.5 flex items-center justify-between gap-2 hover:bg-emerald-50/40"
+                  className="p-3 flex items-center justify-between gap-2 hover:bg-emerald-50/40"
                 >
                   <div>
                     <div className="font-bold text-slate-900">
@@ -958,25 +999,25 @@ export const PdvMobilePage: React.FC = () => {
             </div>
           </div>
 
-          {/* Lista de Estoque Somente Visualização */}
-          <div className="bg-white rounded-2xl p-4 border border-emerald-100 shadow-sm space-y-3">
+          {/* Lista de Estoque Disponível */}
+          <div className="bg-white rounded-2xl p-5 border border-emerald-100 shadow-sm space-y-3.5">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-emerald-950">
-                Estoque Disponível (Visualização)
+                Estoque Disponível ({products.filter((p) => p.quantity > 0).length} modelos)
               </h3>
-              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-900">
-                Ajuste manual apenas no PC
+              <span className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900">
+                Somente com saldo &gt; 0
               </span>
             </div>
 
-            <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
+            <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
               {products
                 .filter((p) => p.quantity > 0)
                 .map((p) => (
                   <div key={p.id} className="py-2.5 flex items-center justify-between gap-2 text-xs">
                     <div>
                       <div className="font-bold text-slate-900">{p.name}</div>
-                      <div className="text-slate-500">{p.category}</div>
+                      <div className="text-slate-500">{getProductCategoryGroup(p.category)}</div>
                     </div>
                     <div className="text-right shrink-0">
                       <div className="font-extrabold text-emerald-700">

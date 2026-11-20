@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Wallet,
   Calculator,
@@ -7,7 +8,6 @@ import {
   ShieldCheck,
   TrendingUp,
   Plus,
-  Printer,
   Trash2,
   Check
 } from "lucide-react";
@@ -42,21 +42,6 @@ interface AccountRecord {
   category: string;
   currentSwap: number;
   balances: { id: number; date: string; balance: number; difference: number }[];
-}
-
-interface SimulationRow {
-  id: number;
-  type: string;
-  installments: number;
-  customerRate: number;
-  fixedFee: number;
-  extraInstallmentFee: number;
-  addedFeeValue: number;
-  finalCustomerValue: number;
-  installmentValue: number;
-  machineDiscountRate: number;
-  machineFeeValue: number;
-  netReceiveValue: number;
 }
 
 interface SupplierOrderItemRecord {
@@ -113,41 +98,9 @@ interface SupplierTransactionsSummary {
   currentBalance: number;
 }
 
-interface WarrantyReceiptRecord {
-  id: number;
-  companyName: string;
-  companyCnpj: string;
-  companyPhone1: string;
-  companyPhone2: string;
-  companyStreet: string;
-  customerCpf: string | null;
-  customerName: string;
-  customerPhone: string | null;
-  street: string | null;
-  streetNumber: string | null;
-  neighborhood: string | null;
-  city: string;
-  purchaseDate: string;
-  paymentMethod: string;
-  paymentDetail: string | null;
-  totalAmount: number;
-  warrantyText: string;
-  items: {
-    id: number;
-    quantity: number;
-    model: string;
-    cashPrice: number;
-    cardFee: number;
-    freight: number;
-    totalPrice: number;
-  }[];
-}
-
 export const FinanceiroPage: React.FC = () => {
   const { syncVersion, triggerManualSync } = useRealtime();
-  const [activeTab, setActiveTab] = useState<
-    "ENTRADAS" | "VALORES_REAL" | "TAXA" | "PARAGUAI" | "GARANTIA"
-  >("ENTRADAS");
+  const [activeTab, setActiveTab] = useState<"ENTRADAS" | "VALORES_REAL" | "PARAGUAI">("ENTRADAS");
 
   // 1. Estado Aba Entradas
   const [entriesMonth, setEntriesMonth] = useState("10");
@@ -167,19 +120,7 @@ export const FinanceiroPage: React.FC = () => {
   const [balanceValue, setBalanceValue] = useState("");
   const [swapValue, setSwapValue] = useState("");
 
-  // 3. Estado Aba TAXA (Simulador + Edição de % e Valor Fixo R$)
-  const [simSaleValue, setSimSaleValue] = useState("2900");
-  const [simDownPayment, setSimDownPayment] = useState("0");
-  const [simulations, setSimulations] = useState<SimulationRow[]>([]);
-  const [simBase, setSimBase] = useState(2900);
-  const [editFeeType, setEditFeeType] = useState("CREDITO");
-  const [editFeeInstallments, setEditFeeInstallments] = useState("1");
-  const [editCustomerRatePct, setEditCustomerRatePct] = useState("3.31");
-  const [editFixedFeeBrl, setEditFixedFeeBrl] = useState("5");
-  const [editExtraInstallmentFeeBrl, setEditExtraInstallmentFeeBrl] = useState("3");
-  const [editMachineRatePct, setEditMachineRatePct] = useState("3.31");
-
-  // 4. Estado Aba Paraguai (Fornecedores + Depósitos/Notas JAPA)
+  // 3. Estado Aba Paraguai (Fornecedores + Depósitos/Notas JAPA)
   const [supplierOrders, setSupplierOrders] = useState<SupplierOrderRecord[]>([]);
   const [supplierTransactions, setSupplierTransactions] = useState<SupplierTransactionRecord[]>([]);
   const [supplierSummary, setSupplierSummary] = useState<SupplierTransactionsSummary | null>(null);
@@ -203,65 +144,45 @@ export const FinanceiroPage: React.FC = () => {
   const [txAmount, setTxAmount] = useState("");
   const [txDescription, setTxDescription] = useState("");
 
-  // 5. Estado Aba Garantia
-  const [warranties, setWarranties] = useState<WarrantyReceiptRecord[]>([]);
-  const [selectedWarranty, setSelectedWarranty] = useState<WarrantyReceiptRecord | null>(null);
-  const [wCustomerName, setWCustomerName] = useState("");
-  const [wCustomerCpf, setWCustomerCpf] = useState("");
-  const [wCustomerPhone, setWCustomerPhone] = useState("");
-  const [wStreet, setWStreet] = useState("");
-  const [wNeighborhood, setWNeighborhood] = useState("");
-  const [wCity, setWCity] = useState("JOINVILLE");
-  const [wPaymentMethod, setWPaymentMethod] = useState("PIX");
-  const [wModel, setWModel] = useState("");
-  const [wCashPrice, setWCashPrice] = useState("");
-  const [wCardFee, setWCardFee] = useState("0");
-  const [wFreight, setWFreight] = useState("0");
-
   useEffect(() => {
     let active = true;
     async function loadFinancialData() {
-      try {
-        const [entRes, accRes, simRes, supRes, supTxRes, warRes] = await Promise.all([
-          apiFetch<{ entries: DailyEntryRecord[]; totals: EntriesTotals }>(
-            `/financial/entries?month=${entriesMonth}&year=${entriesYear}`
-          ),
-          apiFetch<AccountRecord[]>("/financial/accounts"),
-          apiFetch<{ calculationBase: number; simulations: SimulationRow[] }>(
-            `/financial/card-fees/simulate?saleValue=${simSaleValue}&downPayment=${simDownPayment}`
-          ),
-          apiFetch<SupplierOrderRecord[]>("/suppliers/orders"),
-          apiFetch<{
-            transactions: SupplierTransactionRecord[];
-            summary: SupplierTransactionsSummary;
-          }>("/suppliers/transactions"),
-          apiFetch<WarrantyReceiptRecord[]>("/warranties")
-        ]);
-        if (!active) return;
-        setEntries(entRes.entries);
-        setEntriesTotals(entRes.totals);
-        setAccounts(accRes);
-        if (!selectedAccountId && accRes.length > 0) {
-          setSelectedAccountId(String(accRes[0].id));
+      const [entRes, accRes, supRes, supTxRes] = await Promise.allSettled([
+        apiFetch<{ entries: DailyEntryRecord[]; totals: EntriesTotals }>(
+          `/financial/entries?month=${entriesMonth}&year=${entriesYear}`
+        ),
+        apiFetch<AccountRecord[]>("/financial/accounts"),
+        apiFetch<SupplierOrderRecord[]>("/suppliers/orders"),
+        apiFetch<{
+          transactions: SupplierTransactionRecord[];
+          summary: SupplierTransactionsSummary;
+        }>("/suppliers/transactions")
+      ]);
+      if (!active) return;
+
+      if (entRes.status === "fulfilled") {
+        setEntries(entRes.value.entries);
+        setEntriesTotals(entRes.value.totals);
+      }
+      if (accRes.status === "fulfilled") {
+        setAccounts(accRes.value);
+        if (!selectedAccountId && accRes.value.length > 0) {
+          setSelectedAccountId(String(accRes.value[0].id));
         }
-        setSimulations(simRes.simulations);
-        setSimBase(simRes.calculationBase);
-        setSupplierOrders(supRes);
-        setSupplierTransactions(supTxRes.transactions);
-        setSupplierSummary(supTxRes.summary);
-        setWarranties(warRes);
-        if (!selectedWarranty && warRes.length > 0) {
-          setSelectedWarranty(warRes[0]);
-        }
-      } catch (err) {
-        console.error("Erro ao carregar módulo financeiro:", err);
+      }
+      if (supRes.status === "fulfilled") {
+        setSupplierOrders(supRes.value);
+      }
+      if (supTxRes.status === "fulfilled") {
+        setSupplierTransactions(supTxRes.value.transactions);
+        setSupplierSummary(supTxRes.value.summary);
       }
     }
     loadFinancialData();
     return () => {
       active = false;
     };
-  }, [entriesMonth, entriesYear, simSaleValue, simDownPayment, syncVersion]);
+  }, [entriesMonth, entriesYear, syncVersion]);
 
   const handleSaveEntry = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -304,35 +225,6 @@ export const FinanceiroPage: React.FC = () => {
       triggerManualSync();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Erro ao atualizar saldo da conta.");
-    }
-  };
-
-  const handleSelectFeeForEdit = (row: SimulationRow) => {
-    setEditFeeType(row.type);
-    setEditFeeInstallments(String(row.installments));
-    setEditCustomerRatePct(String(Number((row.customerRate * 100).toFixed(4))));
-    setEditFixedFeeBrl(String(row.fixedFee ?? 0));
-    setEditExtraInstallmentFeeBrl(String(row.extraInstallmentFee ?? 0));
-    setEditMachineRatePct(String(Number((row.machineDiscountRate * 100).toFixed(4))));
-  };
-
-  const handleSaveCardFee = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await apiFetch("/financial/card-fees", {
-        method: "POST",
-        body: JSON.stringify({
-          type: editFeeType,
-          installments: Number(editFeeInstallments) || 1,
-          customerRate: Number((Number(editCustomerRatePct) / 100).toFixed(6)),
-          fixedFee: Number(editFixedFeeBrl) || 0,
-          extraInstallmentFee: Number(editExtraInstallmentFeeBrl) || 0,
-          machineDiscountRate: Number((Number(editMachineRatePct) / 100).toFixed(6))
-        })
-      });
-      triggerManualSync();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Erro ao atualizar taxa.");
     }
   };
 
@@ -416,44 +308,6 @@ export const FinanceiroPage: React.FC = () => {
     }
   };
 
-  const handleCreateWarranty = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const created = await apiFetch<WarrantyReceiptRecord>("/warranties", {
-        method: "POST",
-        body: JSON.stringify({
-          customerName: wCustomerName,
-          customerCpf: wCustomerCpf,
-          customerPhone: wCustomerPhone,
-          street: wStreet,
-          neighborhood: wNeighborhood,
-          city: wCity,
-          paymentMethod: wPaymentMethod,
-          items: [
-            {
-              quantity: 1,
-              model: wModel,
-              cashPrice: Number(wCashPrice) || 0,
-              cardFee: Number(wCardFee) || 0,
-              freight: Number(wFreight) || 0
-            }
-          ]
-        })
-      });
-      setWCustomerName("");
-      setWCustomerCpf("");
-      setWCustomerPhone("");
-      setWStreet("");
-      setWNeighborhood("");
-      setWModel("");
-      setWCashPrice("");
-      setSelectedWarranty(created);
-      triggerManualSync();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Erro ao emitir garantia.");
-    }
-  };
-
   const totalAccountReal = accounts.reduce(
     (acc, item) => acc + (item.balances[item.balances.length - 1]?.balance ?? 0),
     0
@@ -474,12 +328,29 @@ export const FinanceiroPage: React.FC = () => {
           </div>
           <div>
             <h2 className="text-xl font-bold text-slate-900">
-              Módulo Financeiro, Fornecedores (Paraguai), Taxas & Garantia
+              Módulo Financeiro & Fornecedores (Paraguai)
             </h2>
             <p className="text-xs text-slate-500">
-              Replicação completa das abas Entradas, Valores Real, TAXA, Paraguai (Japa) e GARANTIA
+              Gestão de Entradas Diárias, Contas & Swap (Valores Real) e Fechamento de Lotes Paraguai (JAPA)
             </p>
           </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <Link
+            to="/taxas"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold transition"
+          >
+            <Calculator className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Ir para Taxas</span>
+          </Link>
+          <Link
+            to="/garantia"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold transition"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Ir para Garantia</span>
+          </Link>
         </div>
       </div>
 
@@ -521,19 +392,6 @@ export const FinanceiroPage: React.FC = () => {
           <button
             type="button"
             role="tab"
-            aria-selected={activeTab === "TAXA"}
-            onClick={() => setActiveTab("TAXA")}
-            className={`px-4 py-2.5 text-xs sm:text-sm font-bold flex items-center gap-2 cursor-pointer ${
-              activeTab === "TAXA" ? "text-emerald-700" : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <Calculator className="w-4 h-4" />
-            <span>Aba TAXA (Simulador Débito a 18x)</span>
-          </button>
-
-          <button
-            type="button"
-            role="tab"
             aria-selected={activeTab === "PARAGUAI"}
             onClick={() => setActiveTab("PARAGUAI")}
             className={`px-4 py-2.5 text-xs sm:text-sm font-bold flex items-center gap-2 cursor-pointer ${
@@ -542,19 +400,6 @@ export const FinanceiroPage: React.FC = () => {
           >
             <Truck className="w-4 h-4" />
             <span>Abas Paraguai (Fornecedor JAPA)</span>
-          </button>
-
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "GARANTIA"}
-            onClick={() => setActiveTab("GARANTIA")}
-            className={`px-4 py-2.5 text-xs sm:text-sm font-bold flex items-center gap-2 cursor-pointer ${
-              activeTab === "GARANTIA" ? "text-emerald-700" : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4" />
-            <span>Aba GARANTIA (Recibo 90 Dias)</span>
           </button>
         </div>
 
@@ -897,206 +742,7 @@ export const FinanceiroPage: React.FC = () => {
         )}
 
         {/* ========================================================================== */}
-        {/* PAINEL 3: ABA TAXA (SIMULADOR DE MAQUININHA DÉBITO E 1X A 18X) */}
-        {/* ========================================================================== */}
-        {activeTab === "TAXA" && (
-          <div className="p-5 space-y-5">
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
-              <div>
-                <label className="block text-xs font-bold uppercase text-emerald-900 mb-1">
-                  VALOR VENDA (R$)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={simSaleValue}
-                  onChange={(e) => setSimSaleValue(e.target.value)}
-                  className="w-full border border-emerald-400 rounded-xl px-3.5 py-2 text-base font-bold bg-white text-slate-900"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase text-emerald-900 mb-1">
-                  VALOR ENTRADA (R$)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={simDownPayment}
-                  onChange={(e) => setSimDownPayment(e.target.value)}
-                  className="w-full border border-emerald-300 rounded-xl px-3.5 py-2 text-base font-bold bg-white text-slate-900"
-                />
-              </div>
-              <div className="bg-emerald-900 text-white rounded-xl p-3.5">
-                <div className="text-[11px] uppercase text-emerald-200 font-semibold">
-                  VALOR CÁLCULO (A PARCELAR)
-                </div>
-                <div className="text-2xl font-extrabold">{formatBRL(simBase)}</div>
-              </div>
-            </div>
-
-            {/* Editor de Taxas (% e Valores Fixos R$ da Aba TAXA) */}
-            <form
-              onSubmit={handleSaveCardFee}
-              className="bg-white border border-emerald-200 rounded-xl p-4 space-y-3 shadow-sm"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h4 className="text-xs font-bold uppercase text-emerald-900">
-                  Editar Taxa Percentual (%) & Acréscimos Fixos (R$) — Clique em uma linha da tabela ou escolha abaixo
-                </h4>
-                <span className="text-[11px] text-slate-500">
-                  Fórmula Planilha: Taxa (H) = Base * % + Taxa Fixa R$ | Valor Final (B) = Base + Taxa (H) + Extra Final R$
-                </span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Faixa / Tipo
-                  </label>
-                  <select
-                    value={editFeeType}
-                    onChange={(e) => {
-                      const found = simulations.find((s) => s.type === e.target.value);
-                      if (found) {
-                        handleSelectFeeForEdit(found);
-                      } else {
-                        setEditFeeType(e.target.value);
-                      }
-                    }}
-                    className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-bold bg-white"
-                  >
-                    {simulations.map((s) => (
-                      <option key={s.type} value={s.type}>
-                        {s.type} ({s.installments}x)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    % Juros Cliente
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={editCustomerRatePct}
-                    onChange={(e) => setEditCustomerRatePct(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Taxa Fixa Col. H (R$)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={editFixedFeeBrl}
-                    onChange={(e) => setEditFixedFeeBrl(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Extra Final Col. B (R$)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={editExtraInstallmentFeeBrl}
-                    onChange={(e) => setEditExtraInstallmentFeeBrl(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    % Taxa Maquininha
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={editMachineRatePct}
-                    onChange={(e) => setEditMachineRatePct(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-semibold"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
-                >
-                  Salvar Taxa ({editFeeType})
-                </button>
-              </div>
-            </form>
-
-            <div
-              tabIndex={0}
-              role="region"
-              aria-label="Tabela de Simulação de Taxas de Cartão"
-              className="table-wrapper border border-slate-200 rounded-xl"
-            >
-              <table className="text-left text-xs sm:text-sm">
-                <thead className="bg-emerald-900 text-white text-xs uppercase">
-                  <tr>
-                    <th className="py-3 px-4">Tipo / Parcela</th>
-                    <th className="py-3 px-3 text-right">Valor Final (Col. B)</th>
-                    <th className="py-3 px-3 text-right">Valor da Parcela</th>
-                    <th className="py-3 px-3 text-right">% Juros</th>
-                    <th className="py-3 px-3 text-right">Fixo (R$)</th>
-                    <th className="py-3 px-3 text-right">Valor Taxa (Col. H)</th>
-                    <th className="py-3 px-3 text-right bg-emerald-950">Receber (Col. K)</th>
-                    <th className="py-3 px-3 text-right">Taxa Maq. (%)</th>
-                    <th className="py-3 px-4 text-right">Desconto Maq. (Col. N)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {simulations.map((row) => (
-                    <tr
-                      key={row.id}
-                      onClick={() => handleSelectFeeForEdit(row)}
-                      className="hover:bg-emerald-50/60 cursor-pointer"
-                      title="Clique para editar esta faixa de taxa"
-                    >
-                      <th className="py-2.5 px-4 font-bold text-slate-900">{row.type}</th>
-                      <td className="py-2.5 px-3 text-right font-bold text-emerald-800">
-                        {formatBRL(row.finalCustomerValue)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-semibold text-slate-800">
-                        {row.installments}x de {formatBRL(row.installmentValue)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-slate-600">
-                        {(row.customerRate * 100).toFixed(2)}%
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-slate-500">
-                        {row.fixedFee > 0 || row.extraInstallmentFee > 0
-                          ? `+${formatBRL(row.fixedFee)} / +${formatBRL(row.extraInstallmentFee)}`
-                          : "R$ 0,00"}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-semibold text-slate-700">
-                        {formatBRL(row.addedFeeValue)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-emerald-700 bg-emerald-50/50">
-                        {formatBRL(row.netReceiveValue)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-rose-600">
-                        {(row.machineDiscountRate * 100).toFixed(2)}%
-                      </td>
-                      <td className="py-2.5 px-4 text-right text-rose-600">
-                        {formatBRL(row.machineFeeValue)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================== */}
-        {/* PAINEL 4: ABAS PARAGUAI (Paraguai Marcio, Paraguai edi, Paraguia 30-10) */}
+        {/* PAINEL 3: ABAS PARAGUAI (Paraguai Marcio, Paraguai edi, Paraguia 30-10) */}
         {/* ========================================================================== */}
         {activeTab === "PARAGUAI" && (
           <div className="p-5 space-y-6">
@@ -1590,268 +1236,6 @@ export const FinanceiroPage: React.FC = () => {
                 </div>
               )}
             </form>
-          </div>
-        )}
-
-        {/* ========================================================================== */}
-        {/* PAINEL 5: ABA GARANTIA (EMISSÃO E IMPRESSÃO DO RECIBO DE 90 DIAS) */}
-        {/* ========================================================================== */}
-        {activeTab === "GARANTIA" && (
-          <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Formulário para emitir novo Termo de Garantia */}
-            <form
-              onSubmit={handleCreateWarranty}
-              className="bg-emerald-50/60 border border-emerald-200 rounded-2xl p-5 space-y-3"
-            >
-              <h4 className="font-bold text-emerald-900 text-sm uppercase">
-                Emitir Novo Termo de Garantia (Aba GARANTIA)
-              </h4>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Cliente *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={wCustomerName}
-                    onChange={(e) => setWCustomerName(e.target.value)}
-                    placeholder="Nome completo do cliente"
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">CPF</label>
-                  <input
-                    type="text"
-                    value={wCustomerCpf}
-                    onChange={(e) => setWCustomerCpf(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Telefone
-                  </label>
-                  <input
-                    type="text"
-                    value={wCustomerPhone}
-                    onChange={(e) => setWCustomerPhone(e.target.value)}
-                    placeholder="Ex: 47 996348663"
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Endereço
-                  </label>
-                  <input
-                    type="text"
-                    value={wStreet}
-                    onChange={(e) => setWStreet(e.target.value)}
-                    placeholder="Ex: RUA HERACLITO LOBATO"
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Bairro</label>
-                  <input
-                    type="text"
-                    value={wNeighborhood}
-                    onChange={(e) => setWNeighborhood(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cidade</label>
-                  <input
-                    type="text"
-                    value={wCity}
-                    onChange={(e) => setWCity(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Modelo do Produto *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={wModel}
-                    onChange={(e) => setWModel(e.target.value)}
-                    placeholder="Ex: POCO C85 256GB 8GB RAM ROXO"
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Valor à Vista (R$) *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={wCashPrice}
-                    onChange={(e) => setWCashPrice(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Forma de Pagamento
-                  </label>
-                  <input
-                    type="text"
-                    value={wPaymentMethod}
-                    onChange={(e) => setWPaymentMethod(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Taxa Cartão (R$)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={wCardFee}
-                    onChange={(e) => setWCardFee(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Frete (R$)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={wFreight}
-                    onChange={(e) => setWFreight(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm cursor-pointer"
-              >
-                Gerar Termo de Garantia
-              </button>
-
-              {warranties.length > 0 && (
-                <div className="pt-3 border-t border-emerald-200 space-y-1.5">
-                  <div className="text-xs font-bold text-slate-700">
-                    Garantias Emitidas Recentemente:
-                  </div>
-                  {warranties.map((w) => (
-                    <button
-                      key={w.id}
-                      type="button"
-                      onClick={() => setSelectedWarranty(w)}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between cursor-pointer ${
-                        selectedWarranty?.id === w.id
-                          ? "bg-emerald-700 text-white font-semibold"
-                          : "bg-white hover:bg-emerald-100 text-slate-700"
-                      }`}
-                    >
-                      <span>
-                        {w.customerName} — {w.items[0]?.model}
-                      </span>
-                      <span>{formatBRL(w.totalAmount)}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </form>
-
-            {/* Visualização fiel à aba GARANTIA da Planilha */}
-            {selectedWarranty && (
-              <div className="bg-white border-2 border-slate-300 rounded-2xl p-6 space-y-4 text-xs shadow-sm">
-                <div className="flex items-start justify-between border-b border-slate-200 pb-4">
-                  <div>
-                    <h3 className="text-base font-extrabold text-emerald-900">
-                      {selectedWarranty.companyName}
-                    </h3>
-                    <p className="text-slate-600">{selectedWarranty.companyStreet}</p>
-                    <p className="text-slate-600">CNPJ: {selectedWarranty.companyCnpj}</p>
-                    <p className="text-slate-600">
-                      WhatsApp: {selectedWarranty.companyPhone1} / {selectedWarranty.companyPhone2}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => window.print()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold cursor-pointer"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span>Imprimir</span>
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                  <div>
-                    <strong>CLIENTE:</strong> {selectedWarranty.customerName}
-                  </div>
-                  <div>
-                    <strong>CPF:</strong> {selectedWarranty.customerCpf || "-"}
-                  </div>
-                  <div>
-                    <strong>TELEFONE:</strong> {selectedWarranty.customerPhone || "-"}
-                  </div>
-                  <div>
-                    <strong>DATA COMPRA:</strong> {formatDateBR(selectedWarranty.purchaseDate)}
-                  </div>
-                  <div className="col-span-2">
-                    <strong>ENDEREÇO:</strong> {selectedWarranty.street || "-"}{" "}
-                    {selectedWarranty.neighborhood ? `- ${selectedWarranty.neighborhood}` : ""} (
-                    {selectedWarranty.city})
-                  </div>
-                </div>
-
-                <table className="w-full border border-slate-200 text-left">
-                  <thead className="bg-slate-100">
-                    <tr>
-                      <th className="p-2">QTD</th>
-                      <th className="p-2">MODELO</th>
-                      <th className="p-2 text-right">VALOR VISTA</th>
-                      <th className="p-2 text-right">TAXA</th>
-                      <th className="p-2 text-right">FRETE</th>
-                      <th className="p-2 text-right">TOTAL</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedWarranty.items.map((item) => (
-                      <tr key={item.id} className="border-t border-slate-200">
-                        <td className="p-2 font-bold">{item.quantity}</td>
-                        <td className="p-2 font-semibold">{item.model}</td>
-                        <td className="p-2 text-right">{formatBRL(item.cashPrice)}</td>
-                        <td className="p-2 text-right">{formatBRL(item.cardFee)}</td>
-                        <td className="p-2 text-right">{formatBRL(item.freight)}</td>
-                        <td className="p-2 text-right font-bold">{formatBRL(item.totalPrice)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                <div className="flex items-center justify-between bg-emerald-50 p-3 rounded-xl border border-emerald-200">
-                  <div>
-                    <strong>FORMA PAGAMENTO:</strong> {selectedWarranty.paymentMethod} (
-                    {selectedWarranty.paymentDetail})
-                  </div>
-                  <div className="text-sm font-extrabold text-emerald-900">
-                    VALOR TOTAL A PAGAR: {formatBRL(selectedWarranty.totalAmount)}
-                  </div>
-                </div>
-
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] font-medium text-amber-950 leading-relaxed">
-                  {selectedWarranty.warrantyText}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
