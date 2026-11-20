@@ -15,10 +15,12 @@ import {
   Watch,
   Headphones,
   Cpu,
-  Columns3
+  Columns3,
+  FileSpreadsheet
 } from "lucide-react";
 import { apiFetch, formatBRL, formatDateBR, formatUSD, toISODateInput } from "../lib/api";
 import { useRealtime } from "../context/RealtimeContext";
+import { ImportXlsxModal } from "../components/ImportXlsxModal";
 
 export interface ProductRecord {
   id: number;
@@ -135,6 +137,8 @@ export const EstoquePage: React.FC = () => {
   const [showZeroStock, setShowZeroStock] = useState<boolean>(false);
   const [perfumeSubFilter, setPerfumeSubFilter] = useState<string>("ALL");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [importFeedback, setImportFeedback] = useState<string | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [showAssistancePanel, setShowAssistancePanel] = useState(false);
 
   // Estado do formulário de criação / edição (Apenas PC)
@@ -420,28 +424,38 @@ export const EstoquePage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           {isPc ? (
-            <button
-              type="button"
-              onClick={() =>
-                openNewProductForm(
-                  activeTab === "RELOGIO"
-                    ? "RELOGIO"
-                    : activeTab === "FONE"
-                    ? "FONE"
-                    : activeTab === "PERFUME"
-                    ? "PERFUME_FEMININO"
-                    : activeTab === "OUTROS"
-                    ? "OUTROS"
-                    : "CELULAR"
-                )
-              }
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold shadow-sm transition cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Cadastrar Produto</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setShowImportModal(true)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs sm:text-sm font-semibold shadow-sm transition cursor-pointer"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Importar Planilha (.xlsx)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  openNewProductForm(
+                    activeTab === "RELOGIO"
+                      ? "RELOGIO"
+                      : activeTab === "FONE"
+                      ? "FONE"
+                      : activeTab === "PERFUME"
+                      ? "PERFUME_FEMININO"
+                      : activeTab === "OUTROS"
+                      ? "OUTROS"
+                      : "CELULAR"
+                  )
+                }
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold shadow-sm transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Cadastrar Produto</span>
+              </button>
+            </>
           ) : (
             <div className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-100 text-amber-900 text-xs font-semibold border border-amber-300">
               <Lock className="w-4 h-4" />
@@ -450,6 +464,25 @@ export const EstoquePage: React.FC = () => {
           )}
         </div>
       </div>
+
+      <ImportXlsxModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        defaultTarget="estoque"
+        onSuccess={(msg) => {
+          setImportFeedback(msg);
+          triggerManualSync();
+        }}
+      />
+
+      {importFeedback && (
+        <div className="bg-emerald-600 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center justify-between shadow-sm">
+          <span>{importFeedback}</span>
+          <button type="button" onClick={() => setImportFeedback(null)} className="cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {errorMsg && (
         <div className="bg-rose-50 border border-rose-200 text-rose-800 px-4 py-3 rounded-xl text-xs font-medium flex items-center justify-between">

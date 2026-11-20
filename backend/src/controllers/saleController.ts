@@ -114,35 +114,89 @@ async function incrementProductStock(
 }
 
 export const saleController = {
-  // Listar vendas com filtros por dia, mês, ano ou status + totais do rodapé da planilha
+  // Listar vendas com filtros por dia, mês, ano, busca textual ou histórico completo + totais
   async list(req: Request, res: Response): Promise<void> {
     try {
-      const { date, month, year, status } = req.query;
+      const { date, month, year, status, search, all } = req.query;
 
       const where: Prisma.SaleWhereInput = {};
 
-      if (status) {
+      if (status && String(status).toUpperCase() !== "ALL") {
         where.status = String(status).toUpperCase();
-      } else {
+      } else if (!status) {
         where.status = "COMPLETED";
       }
 
       if (date) {
         const { start, end } = normalizeDayRange(String(date));
         where.saleDate = { gte: start, lte: end };
-      } else if (month && year) {
+      } else if (all !== "true" && month && month !== "ALL" && year && year !== "ALL") {
         const m = Number(month) - 1;
         const y = Number(year);
         const start = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0));
         const end = new Date(Date.UTC(y, m + 1, 0, 23, 59, 59, 999));
         where.saleDate = { gte: start, lte: end };
+      } else if (all !== "true" && year && year !== "ALL" && (!month || month === "ALL")) {
+        const y = Number(year);
+        const start = new Date(Date.UTC(y, 0, 1, 0, 0, 0, 0));
+        const end = new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999));
+        where.saleDate = { gte: start, lte: end };
       }
 
-      const sales = await prisma.sale.findMany({
-        where,
-        include: { product: true },
-        orderBy: [{ saleDate: "desc" }, { id: "asc" }]
-      });
+      if (search && String(search).trim() !== "") {
+        const term = String(search).trim();
+        where.OR = [
+          { productName: { contains: term } },
+          { neighborhood: { contains: term } },
+          { paymentMethod: { contains: term } }
+        ];
+      }
+
+      const [sales, allCompletedDates] = await Promise.all([
+        prisma.sale.findMany({
+          where,
+          include: { product: true },
+          orderBy: [{ saleDate: "desc" }, { id: "asc" }]
+        }),
+        prisma.sale.findMany({
+          where: { status: "COMPLETED" },
+          select: {
+            saleDate: true,
+            quantity: true,
+            netSaleValue: true,
+            secondaryNetValue: true
+          },
+          orderBy: { saleDate: "desc" }
+        })
+      ]);
+
+      const periodMap = new Map<
+        string,
+        { month: number; year: number; count: number; totalQuantity: number; totalNetValue: number }
+      >();
+      for (const item of allCompletedDates) {
+        const d = new Date(item.saleDate);
+        const m = d.getUTCMonth() + 1;
+        const y = d.getUTCFullYear();
+        const key = `${y}-${String(m).padStart(2, "0")}`;
+        const current = periodMap.get(key) || {
+          month: m,
+          year: y,
+          count: 0,
+          totalQuantity: 0,
+          totalNetValue: 0
+        };
+        current.count += 1;
+        current.totalQuantity += item.quantity;
+        current.totalNetValue = Number(
+          (current.totalNetValue + item.netSaleValue + (item.secondaryNetValue || 0)).toFixed(2)
+        );
+        periodMap.set(key, current);
+      }
+
+      const availablePeriods = Array.from(periodMap.values()).sort((a, b) =>
+        b.year !== a.year ? b.year - a.year : b.month - a.month
+      );
 
       const totals = sales.reduce(
         (acc, s) => {
@@ -176,7 +230,7 @@ export const saleController = {
         }
       );
 
-      res.json({ sales, totals });
+      res.json({ sales, totals, availablePeriods });
     } catch (error) {
       console.error("Erro ao listar vendas:", error);
       res.status(500).json({ error: "Erro ao listar vendas." });

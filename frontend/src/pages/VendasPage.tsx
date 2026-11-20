@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ShoppingCart,
   Plus,
@@ -9,11 +9,21 @@ import {
   X,
   Edit3,
   FileSpreadsheet,
-  HardDriveDownload
+  HardDriveDownload,
+  History,
+  Search,
+  Upload,
+  FolderArchive
 } from "lucide-react";
 import { apiFetch, formatBRL, formatDateBR, getExportSalesUrl, toISODateInput } from "../lib/api";
 import { useRealtime } from "../context/RealtimeContext";
-import { ProductRecord } from "./EstoquePage";
+import { ProductRecord, getProductCategoryGroup } from "./EstoquePage";
+import {
+  GoogleAutocomplete,
+  AutocompleteOption,
+  JOINVILLE_NEIGHBORHOODS
+} from "../components/GoogleAutocomplete";
+import { ImportXlsxModal } from "../components/ImportXlsxModal";
 
 export interface SaleRecord {
   id: number;
@@ -50,6 +60,35 @@ interface SalesTotals {
   totalDifference: number;
 }
 
+interface AvailablePeriod {
+  month: number;
+  year: number;
+  count: number;
+  totalQuantity: number;
+  totalNetValue: number;
+}
+
+interface LocalBackupFile {
+  fileName: string;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+const MONTH_NAMES: Record<number, string> = {
+  1: "Janeiro",
+  2: "Fevereiro",
+  3: "Março",
+  4: "Abril",
+  5: "Maio",
+  6: "Junho",
+  7: "Julho",
+  8: "Agosto",
+  9: "Setembro",
+  10: "Outubro",
+  11: "Novembro",
+  12: "Dezembro"
+};
+
 const PAYMENT_OPTIONS = [
   "PIX MASTER",
   "PAG SEGURO",
@@ -67,16 +106,22 @@ const PAYMENT_OPTIONS = [
 export const VendasPage: React.FC = () => {
   const { syncVersion, triggerManualSync } = useRealtime();
 
+  const [mainSection, setMainSection] = useState<"MENSAL" | "HISTORICO">("MENSAL");
   const [selectedMonth, setSelectedMonth] = useState("10");
   const [selectedYear, setSelectedYear] = useState("2026");
   const [selectedDateTab, setSelectedDateTab] = useState<string>("ALL");
   const [statusFilter, setStatusFilter] = useState<"COMPLETED" | "CANCELLED">("COMPLETED");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showAllHistoryMonths, setShowAllHistoryMonths] = useState(false);
 
   const [sales, setSales] = useState<SaleRecord[]>([]);
   const [totals, setTotals] = useState<SalesTotals | null>(null);
+  const [availablePeriods, setAvailablePeriods] = useState<AvailablePeriod[]>([]);
+  const [localBackups, setLocalBackups] = useState<LocalBackupFile[]>([]);
   const [products, setProducts] = useState<ProductRecord[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   // Estado do Formulário de Venda
   const [showForm, setShowForm] = useState(false);
@@ -100,26 +145,80 @@ export const VendasPage: React.FC = () => {
   useEffect(() => {
     let active = true;
     async function loadData() {
-      try {
-        const [salesRes, prodRes] = await Promise.all([
-          apiFetch<{ sales: SaleRecord[]; totals: SalesTotals }>(
-            `/sales?month=${selectedMonth}&year=${selectedYear}&status=${statusFilter}`
-          ),
-          apiFetch<{ products: ProductRecord[] }>("/products?active=true")
-        ]);
-        if (!active) return;
-        setSales(salesRes.sales);
-        setTotals(salesRes.totals);
-        setProducts(prodRes.products);
-      } catch (err) {
-        console.error("Erro ao carregar vendas:", err);
+      const salesUrl =
+        mainSection === "HISTORICO" && showAllHistoryMonths
+          ? `/sales?all=true&status=${statusFilter}`
+          : `/sales?month=${selectedMonth}&year=${selectedYear}&status=${statusFilter}`;
+
+      const [salesRes, prodRes, backupsRes] = await Promise.allSettled([
+        apiFetch<{
+          sales: SaleRecord[];
+          totals: SalesTotals;
+          availablePeriods?: AvailablePeriod[];
+        }>(salesUrl),
+        apiFetch<{ products: ProductRecord[] }>("/products?active=true"),
+        apiFetch<{ backups: LocalBackupFile[] }>("/sales/backups")
+      ]);
+
+      if (!active) return;
+
+      if (salesRes.status === "fulfilled") {
+        setSales(salesRes.value.sales);
+        setTotals(salesRes.value.totals);
+        if (salesRes.value.availablePeriods) {
+          setAvailablePeriods(salesRes.value.availablePeriods);
+        }
+      }
+      if (prodRes.status === "fulfilled") {
+        setProducts(prodRes.value.products);
+      }
+      if (backupsRes.status === "fulfilled") {
+        setLocalBackups(backupsRes.value.backups || []);
       }
     }
     loadData();
     return () => {
       active = false;
     };
-  }, [selectedMonth, selectedYear, statusFilter, syncVersion]);
+  }, [selectedMonth, selectedYear, statusFilter, mainSection, showAllHistoryMonths, syncVersion]);
+
+  // Opções de Autocomplete de Produtos
+  const productAutocompleteOptions = useMemo<AutocompleteOption[]>(() => {
+    const sorted = [...products].sort((a, b) => {
+      if (a.quantity > 0 && b.quantity <= 0) return -1;
+      if (a.quantity <= 0 && b.quantity > 0) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    return sorted.map((p) => {
+      const group = getProductCategoryGroup(p.category);
+      return {
+        id: p.id,
+        label: p.name,
+        sublabel: `Categoria: ${group} • Valor Tabela: ${formatBRL(p.salePrice)}`,
+        badgeText: p.quantity > 0 ? `${p.quantity} disp. • ${formatBRL(p.salePrice)}` : "Zerado",
+        badgeColor:
+          p.quantity > 0 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800",
+        data: p
+      };
+    });
+  }, [products]);
+
+  // Opções de Autocomplete de Bairros de Joinville - SC
+  const neighborhoodAutocompleteOptions = useMemo<AutocompleteOption<string>[]>(() => {
+    return JOINVILLE_NEIGHBORHOODS.map((bName) => ({
+      id: bName,
+      label: bName,
+      sublabel:
+        bName === "LOCAL"
+          ? "Retirada na Loja / Balcão (Joinville - SC)"
+          : "Bairro de Joinville e Região - SC",
+      badgeText: bName === "LOCAL" ? "Balcão" : "Joinville/SC",
+      badgeColor:
+        bName === "LOCAL" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700",
+      data: bName
+    }));
+  }, []);
 
   // Extrai todas as abas de datas existentes no mês (ex: 04-10, 18-10, 19-10...) igual ao ARQUIVO MORTO
   const availableDateTabs = Array.from(
@@ -133,16 +232,28 @@ export const VendasPage: React.FC = () => {
     )
   ).sort();
 
-  const filteredSales =
-    selectedDateTab === "ALL"
-      ? sales
-      : sales.filter((s) => {
-          const d = new Date(s.saleDate);
-          const tab = `${String(d.getUTCDate()).padStart(2, "0")}-${String(
-            d.getUTCMonth() + 1
-          ).padStart(2, "0")}`;
-          return tab === selectedDateTab;
-        });
+  const filteredSales = useMemo(() => {
+    const term = searchQuery.trim().toLowerCase();
+    return sales.filter((s) => {
+      if (mainSection === "MENSAL" && selectedDateTab !== "ALL") {
+        const d = new Date(s.saleDate);
+        const tab = `${String(d.getUTCDate()).padStart(2, "0")}-${String(
+          d.getUTCMonth() + 1
+        ).padStart(2, "0")}`;
+        if (tab !== selectedDateTab) return false;
+      }
+
+      if (term) {
+        const matchProd = s.productName.toLowerCase().includes(term);
+        const matchNeigh = s.neighborhood.toLowerCase().includes(term);
+        const matchPay = s.paymentMethod.toLowerCase().includes(term);
+        const matchDate = formatDateBR(s.saleDate).includes(term);
+        if (!matchProd && !matchNeigh && !matchPay && !matchDate) return false;
+      }
+
+      return true;
+    });
+  }, [sales, mainSection, selectedDateTab, searchQuery]);
 
   const filteredTotals = filteredSales.reduce(
     (acc, s) => {
@@ -174,15 +285,27 @@ export const VendasPage: React.FC = () => {
     }
   );
 
-  const handleSelectProduct = (prodIdStr: string) => {
-    setSelectedProductId(prodIdStr);
-    const prod = products.find((p) => p.id === Number(prodIdStr));
+  const handleSelectProductOption = (opt: AutocompleteOption) => {
+    const prod = products.find((p) => p.id === Number(opt.id));
     if (prod) {
       const qty = Number(quantity) || 1;
+      setSelectedProductId(String(prod.id));
       setProductName(prod.name);
       setStockValue(String(prod.salePrice * qty));
       setGrossValue(String(prod.salePrice * qty));
       setNetSaleValue(String(prod.salePrice * qty));
+    }
+  };
+
+  const handleProductQueryChange = (val: string) => {
+    setProductName(val);
+    const exactMatch = products.find(
+      (p) => p.name.trim().toLowerCase() === val.trim().toLowerCase()
+    );
+    if (exactMatch) {
+      setSelectedProductId(String(exactMatch.id));
+    } else {
+      setSelectedProductId("");
     }
   };
 
@@ -234,10 +357,10 @@ export const VendasPage: React.FC = () => {
       setErrorMsg(null);
       const payload = {
         saleDate: `${saleDate}T12:00:00.000Z`,
-        neighborhood,
+        neighborhood: neighborhood.trim().toUpperCase() || "LOCAL",
         quantity: Number(quantity) || 1,
         productId: selectedProductId ? Number(selectedProductId) : null,
-        productName,
+        productName: productName.trim(),
         grossValue: Number(grossValue) || 0,
         secondaryNetValue: Number(secondaryNetValue) || 0,
         secondaryPaymentMethod: secondaryPaymentMethod.trim() || null,
@@ -323,6 +446,7 @@ export const VendasPage: React.FC = () => {
         })
       });
       setFeedbackMsg(res.message);
+      triggerManualSync();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Erro ao salvar backup local.");
     }
@@ -345,90 +469,66 @@ export const VendasPage: React.FC = () => {
           </div>
           <div>
             <h2 className="text-xl font-bold text-slate-900">
-              Controle de Vendas — Aba Vendas Dia & Histórico (Arquivo Morto)
+              Controle de Vendas & Histórico Permanente (Arquivo Morto)
             </h2>
             <p className="text-xs text-slate-500">
-              Baixa imediata no SQLite e retorno automático do produto ao estoque em caso de cancelamento/exclusão
+              Todas as vendas permanecem salvas no SQLite após a virada de mês, com exportação e importação .xlsx
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={selectedMonth}
-            onChange={(e) => {
-              setSelectedMonth(e.target.value);
-              setSelectedDateTab("ALL");
-            }}
-            aria-label="Selecionar mês"
-            className="text-xs font-semibold border border-emerald-200 rounded-lg px-3 py-2 bg-white"
+          <button
+            type="button"
+            onClick={() => setShowImportModal(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-900 hover:bg-emerald-950 text-white text-xs sm:text-sm font-semibold shadow-sm transition cursor-pointer"
           >
-            <option value="1">Janeiro</option>
-            <option value="2">Fevereiro</option>
-            <option value="3">Março</option>
-            <option value="4">Abril</option>
-            <option value="5">Maio</option>
-            <option value="6">Junho</option>
-            <option value="7">Julho</option>
-            <option value="8">Agosto</option>
-            <option value="9">Setembro</option>
-            <option value="10">Outubro</option>
-            <option value="11">Novembro</option>
-            <option value="12">Dezembro</option>
-          </select>
-
-          <select
-            value={selectedYear}
-            onChange={(e) => {
-              setSelectedYear(e.target.value);
-              setSelectedDateTab("ALL");
-            }}
-            aria-label="Selecionar ano"
-            className="text-xs font-semibold border border-emerald-200 rounded-lg px-3 py-2 bg-white"
-          >
-            <option value="2025">2025</option>
-            <option value="2026">2026</option>
-            <option value="2027">2027</option>
-          </select>
-
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as "COMPLETED" | "CANCELLED")}
-            aria-label="Filtrar por status da venda"
-            className="text-xs font-semibold border border-emerald-200 rounded-lg px-3 py-2 bg-white"
-          >
-            <option value="COMPLETED">Vendas Ativas ({sales.length})</option>
-            <option value="CANCELLED">Vendas Canceladas</option>
-          </select>
+            <Upload className="w-4 h-4" />
+            <span>Importar Planilha (.xlsx)</span>
+          </button>
 
           <a
             href={getExportSalesUrl(selectedMonth, selectedYear)}
             download
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs sm:text-sm font-semibold shadow-sm transition"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs sm:text-sm font-semibold shadow-sm transition"
           >
             <FileSpreadsheet className="w-4 h-4" />
-            <span>Exportar Arquivo Morto (.xlsx)</span>
+            <span>
+              Exportar Arquivo Morto ({selectedMonth.padStart(2, "0")}/{selectedYear} .xlsx)
+            </span>
           </a>
 
           <button
             type="button"
             onClick={handleSaveLocalBackup}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs sm:text-sm font-semibold shadow-sm transition cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs sm:text-sm font-semibold shadow-sm transition cursor-pointer"
           >
             <HardDriveDownload className="w-4 h-4" />
-            <span>Salvar Backup na Pasta Local</span>
+            <span>Gerar Backup Mensal</span>
           </button>
 
           <button
             type="button"
             onClick={openNewSaleForm}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold shadow-sm transition cursor-pointer"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-extrabold shadow-sm transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Nova Venda</span>
           </button>
         </div>
       </div>
+
+      <ImportXlsxModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        defaultTarget="vendas"
+        defaultYear={selectedYear}
+        defaultMonth={selectedMonth}
+        onSuccess={(msg) => {
+          setFeedbackMsg(msg);
+          triggerManualSync();
+        }}
+      />
 
       {errorMsg && (
         <div className="bg-rose-50 border border-rose-200 text-rose-800 px-4 py-3 rounded-xl text-xs font-medium flex items-center justify-between">
@@ -440,7 +540,7 @@ export const VendasPage: React.FC = () => {
       )}
 
       {feedbackMsg && (
-        <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-xl text-xs font-medium flex items-center justify-between">
+        <div className="bg-emerald-600 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center justify-between shadow-sm">
           <span>{feedbackMsg}</span>
           <button type="button" onClick={() => setFeedbackMsg(null)} className="cursor-pointer">
             <X className="w-4 h-4" />
@@ -448,7 +548,232 @@ export const VendasPage: React.FC = () => {
         </div>
       )}
 
-      {/* Formulário de Registro / Edição de Venda */}
+      {/* Seletor de Modo Principal: Vendas do Mês (Abas Diárias) vs Histórico Permanente */}
+      <div className="bg-white rounded-2xl border border-emerald-100 p-4 shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div
+            role="tablist"
+            aria-label="Modos de Visualização de Vendas"
+            className="inline-flex items-center rounded-xl bg-slate-100 p-1 gap-1"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mainSection === "MENSAL"}
+              onClick={() => {
+                setMainSection("MENSAL");
+                setShowAllHistoryMonths(false);
+              }}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold transition cursor-pointer ${
+                mainSection === "MENSAL"
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "text-slate-700 hover:text-slate-900"
+              }`}
+            >
+              <Calendar className="w-4 h-4" />
+              <span>Vendas por Mês & Abas Diárias (DD-MM)</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mainSection === "HISTORICO"}
+              onClick={() => {
+                setMainSection("HISTORICO");
+                setSelectedDateTab("ALL");
+              }}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold transition cursor-pointer ${
+                mainSection === "HISTORICO"
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "text-slate-700 hover:text-slate-900"
+              }`}
+            >
+              <History className="w-4 h-4" />
+              <span>Histórico Permanente & Arquivo Morto</span>
+            </button>
+          </div>
+
+          {/* Filtros de Mês, Ano, Status e Busca Textual */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Pesquisar produto, bairro, data ou pag..."
+                className="pl-8 pr-3 py-1.5 rounded-lg border border-emerald-200 text-xs font-medium bg-slate-50 focus:bg-white w-56 sm:w-64"
+              />
+            </div>
+
+            <select
+              value={showAllHistoryMonths ? "ALL" : selectedMonth}
+              onChange={(e) => {
+                if (e.target.value === "ALL") {
+                  setShowAllHistoryMonths(true);
+                  setMainSection("HISTORICO");
+                } else {
+                  setShowAllHistoryMonths(false);
+                  setSelectedMonth(e.target.value);
+                  setSelectedDateTab("ALL");
+                }
+              }}
+              aria-label="Selecionar mês"
+              className="text-xs font-bold border border-emerald-300 rounded-lg px-3 py-1.5 bg-white"
+            >
+              <option value="ALL">Todos os Meses (Histórico Completo)</option>
+              <option value="1">Janeiro</option>
+              <option value="2">Fevereiro</option>
+              <option value="3">Março</option>
+              <option value="4">Abril</option>
+              <option value="5">Maio</option>
+              <option value="6">Junho</option>
+              <option value="7">Julho</option>
+              <option value="8">Agosto</option>
+              <option value="9">Setembro</option>
+              <option value="10">Outubro</option>
+              <option value="11">Novembro</option>
+              <option value="12">Dezembro</option>
+            </select>
+
+            <select
+              value={selectedYear}
+              onChange={(e) => {
+                setSelectedYear(e.target.value);
+                setSelectedDateTab("ALL");
+              }}
+              aria-label="Selecionar ano"
+              className="text-xs font-bold border border-emerald-300 rounded-lg px-3 py-1.5 bg-white"
+            >
+              <option value="2025">2025</option>
+              <option value="2026">2026</option>
+              <option value="2027">2027</option>
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as "COMPLETED" | "CANCELLED")}
+              aria-label="Filtrar por status da venda"
+              className="text-xs font-semibold border border-emerald-200 rounded-lg px-3 py-1.5 bg-white"
+            >
+              <option value="COMPLETED">Vendas Ativas ({sales.length})</option>
+              <option value="CANCELLED">Vendas Canceladas</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Painel de Períodos Históricos e Backups quando na Aba HISTÓRICO PERMANENTE */}
+        {mainSection === "HISTORICO" && (
+          <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-extrabold uppercase text-emerald-950 flex items-center gap-1.5">
+                  <FolderArchive className="w-4 h-4 text-emerald-700" />
+                  <span>
+                    Arquivo Morto & Meses Anteriores Salvos Permanentemente no SQLite
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-600">
+                  Clique em qualquer mês abaixo para consultar todas as vendas daquele período ou exportar sua planilha .xlsx completa
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAllHistoryMonths((prev) => !prev)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                  showAllHistoryMonths
+                    ? "bg-emerald-800 border-emerald-800 text-white"
+                    : "bg-white border-emerald-300 text-emerald-900 hover:bg-emerald-100"
+                }`}
+              >
+                {showAllHistoryMonths
+                  ? "Exibindo Todos os Meses do Banco"
+                  : "Ver Todos os Meses Juntos"}
+              </button>
+            </div>
+
+            {/* Cards dos Meses com Vendas Registradas no SQLite */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
+              {availablePeriods.map((p) => {
+                const isSelected =
+                  !showAllHistoryMonths &&
+                  Number(selectedMonth) === p.month &&
+                  Number(selectedYear) === p.year;
+                return (
+                  <div
+                    key={`${p.year}-${p.month}`}
+                    className={`rounded-xl border p-3 flex flex-col justify-between gap-2 transition ${
+                      isSelected
+                        ? "bg-emerald-900 border-emerald-900 text-white shadow-sm"
+                        : "bg-white border-emerald-200 text-slate-800 hover:border-emerald-400"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAllHistoryMonths(false);
+                        setSelectedMonth(String(p.month));
+                        setSelectedYear(String(p.year));
+                        setSelectedDateTab("ALL");
+                      }}
+                      className="text-left cursor-pointer"
+                    >
+                      <div className="text-xs font-extrabold uppercase">
+                        {MONTH_NAMES[p.month] || `Mês ${p.month}`} / {p.year}
+                      </div>
+                      <div
+                        className={`text-[11px] ${
+                          isSelected ? "text-emerald-200" : "text-slate-500"
+                        }`}
+                      >
+                        {p.count} lançamentos • {p.totalQuantity} un. vendidas
+                      </div>
+                      <div
+                        className={`text-sm font-black mt-1 ${
+                          isSelected ? "text-emerald-300" : "text-emerald-700"
+                        }`}
+                      >
+                        {formatBRL(p.totalNetValue)}
+                      </div>
+                    </button>
+
+                    <a
+                      href={getExportSalesUrl(String(p.month), String(p.year))}
+                      download
+                      className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition ${
+                        isSelected
+                          ? "bg-emerald-700 hover:bg-emerald-600 text-white"
+                          : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200"
+                      }`}
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>Baixar Arquivo Morto (.xlsx)</span>
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+
+            {localBackups.length > 0 && (
+              <div className="pt-2 border-t border-emerald-200/80 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                <span className="font-bold text-emerald-900">
+                  Backups automáticos na pasta ./backups/:
+                </span>
+                {localBackups.slice(0, 5).map((b) => (
+                  <span
+                    key={b.fileName}
+                    className="px-2 py-0.5 rounded bg-white border border-emerald-200 font-semibold text-slate-700"
+                  >
+                    {b.fileName}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Formulário de Registro / Edição de Venda com Autocomplete Estilo Google */}
       {showForm && (
         <form
           onSubmit={handleSubmitSale}
@@ -477,53 +802,40 @@ export const VendasPage: React.FC = () => {
                 required
                 value={saleDate}
                 onChange={(e) => setSaleDate(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Bairro / Local *
-              </label>
-              <input
-                type="text"
-                required
+              <GoogleAutocomplete
+                id="vendas-page-neighborhood"
+                label="Bairro / Localização (Joinville - SC)"
+                placeholder="Digite o bairro (Ex: Aventureiro, Centro, Local...)"
                 value={neighborhood}
-                onChange={(e) => setNeighborhood(e.target.value)}
-                placeholder="Ex: LOCAL, ITINGA, JARIVA, ARAQUARI..."
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm uppercase"
+                onChange={(val) => setNeighborhood(val.toUpperCase())}
+                onSelectOption={(opt) => {
+                  setNeighborhood(opt.label);
+                }}
+                options={neighborhoodAutocompleteOptions}
+                iconType="location"
+                uppercase
+                required
+                emptyMessage="Bairro personalizado será salvo como digitado"
               />
             </div>
 
             <div className="sm:col-span-2">
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Vincular Produto do Estoque (Dá baixa automática)
-              </label>
-              <select
-                value={selectedProductId}
-                onChange={(e) => handleSelectProduct(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
-              >
-                <option value="">-- Item avulso ou digitar manualmente abaixo --</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} (Estoque: {p.quantity} un. | Tabela: {formatBRL(p.salePrice)})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Descrição do Produto (Coluna PRODUTO) *
-              </label>
-              <input
-                type="text"
-                required
+              <GoogleAutocomplete
+                id="vendas-page-product"
+                label="Produto (Pesquisa Instantânea no Estoque)"
+                placeholder="Digite o modelo do produto (Ex: Redmi Note 17, Poco X8, Perfume...)"
                 value={productName}
-                onChange={(e) => setProductName(e.target.value)}
-                placeholder="Ex: REDMI NOTE 17 5G 256GB 8GB RAM PRETO"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                onChange={handleProductQueryChange}
+                onSelectOption={handleSelectProductOption}
+                options={productAutocompleteOptions}
+                iconType="product"
+                required
+                emptyMessage="Produto avulso (será registrado com a descrição digitada)"
               />
             </div>
 
@@ -536,7 +848,17 @@ export const VendasPage: React.FC = () => {
                 min="1"
                 required
                 value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
+                onChange={(e) => {
+                  const nextQty = e.target.value;
+                  setQuantity(nextQty);
+                  const prod = products.find((p) => String(p.id) === selectedProductId);
+                  if (prod) {
+                    const q = Number(nextQty) || 1;
+                    setStockValue(String(prod.salePrice * q));
+                    setGrossValue(String(prod.salePrice * q));
+                    setNetSaleValue(String(prod.salePrice * q));
+                  }
+                }}
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
               />
             </div>
@@ -719,41 +1041,47 @@ export const VendasPage: React.FC = () => {
         </form>
       )}
 
-      {/* Abas por Data estilo ARQUIVO MORTO (ex: 04-10, 18-10, 19-10...) */}
+      {/* Abas por Data estilo ARQUIVO MORTO (ex: 04-10, 18-10, 19-10...) e Tabela Completa */}
       <div className="bg-white rounded-2xl border border-emerald-100 shadow-sm overflow-hidden">
-        <div
-          role="tablist"
-          aria-label="Abas de datas do mês (estilo Arquivo Morto)"
-          className="flex items-center gap-1.5 px-4 pt-3 border-b border-slate-200 overflow-x-auto bg-slate-50"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={selectedDateTab === "ALL"}
-            onClick={() => setSelectedDateTab("ALL")}
-            className={`px-3.5 py-2 text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
-              selectedDateTab === "ALL" ? "text-emerald-700" : "text-slate-600 hover:text-slate-900"
-            }`}
+        {mainSection === "MENSAL" && (
+          <div
+            role="tablist"
+            aria-label="Abas de datas do mês (estilo Arquivo Morto)"
+            className="flex items-center gap-1.5 px-4 pt-3 border-b border-slate-200 overflow-x-auto bg-slate-50"
           >
-            <Calendar className="w-3.5 h-3.5" />
-            <span>Mês Completo ({sales.length})</span>
-          </button>
-
-          {availableDateTabs.map((tab) => (
             <button
-              key={tab}
               type="button"
               role="tab"
-              aria-selected={selectedDateTab === tab}
-              onClick={() => setSelectedDateTab(tab)}
-              className={`px-3 py-2 text-xs font-bold cursor-pointer ${
-                selectedDateTab === tab ? "text-emerald-700" : "text-slate-600 hover:text-slate-900"
+              aria-selected={selectedDateTab === "ALL"}
+              onClick={() => setSelectedDateTab("ALL")}
+              className={`px-3.5 py-2 text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
+                selectedDateTab === "ALL"
+                  ? "text-emerald-700"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              Aba {tab}
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Mês Completo ({sales.length})</span>
             </button>
-          ))}
-        </div>
+
+            {availableDateTabs.map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={selectedDateTab === tab}
+                onClick={() => setSelectedDateTab(tab)}
+                className={`px-3 py-2 text-xs font-bold cursor-pointer ${
+                  selectedDateTab === tab
+                    ? "text-emerald-700"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Aba {tab}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Tabela Principal de Vendas (Idêntica à Vendas Dia e Arquivo Morto) */}
         <div
@@ -883,7 +1211,13 @@ export const VendasPage: React.FC = () => {
               <tfoot className="bg-emerald-950 text-white font-bold text-xs">
                 <tr>
                   <td className="py-3 px-4" colSpan={3}>
-                    TOTAIS ({selectedDateTab === "ALL" ? "MÊS" : `ABA ${selectedDateTab}`})
+                    TOTAIS (
+                    {showAllHistoryMonths
+                      ? "HISTÓRICO COMPLETO"
+                      : selectedDateTab === "ALL"
+                      ? `MÊS ${selectedMonth}/${selectedYear}`
+                      : `ABA ${selectedDateTab}`}
+                    )
                   </td>
                   <td className="py-3 px-2 text-center">{filteredTotals.totalQuantity}</td>
                   <td className="py-3 px-3 text-right">
@@ -934,9 +1268,9 @@ export const VendasPage: React.FC = () => {
               ), o produto retorna automaticamente para o estoque.
             </span>
             <span>
-              Total Líquido do Mês (J + L):{" "}
+              Total Líquido do Período (J + L):{" "}
               <strong className="text-emerald-800">
-                {formatBRL((totals.totalSecondaryNetValue || 0) + totals.totalNetSaleValue)}
+                {formatBRL(filteredTotals.totalSecondaryNetValue + filteredTotals.totalNetSaleValue)}
               </strong>
             </span>
           </div>

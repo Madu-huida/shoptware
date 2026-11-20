@@ -5,6 +5,7 @@ import { exportController } from "../controllers/exportController";
 import { expenseController } from "../controllers/expenseController";
 import { financialController } from "../controllers/financialController";
 import { supplierWarrantyController } from "../controllers/supplierWarrantyController";
+import { importController } from "../controllers/importController";
 import {
   requirePcForStockAdjustment,
   requireSiteAuth,
@@ -92,5 +93,10 @@ router.get("/warranties", supplierWarrantyController.listWarranties);
 router.get("/warranties/:id", supplierWarrantyController.getWarrantyById);
 router.post("/warranties", supplierWarrantyController.createWarranty);
 router.delete("/warranties/:id", supplierWarrantyController.removeWarranty);
+
+// ============================================================================
+// 6. IMPORTAÇÃO DE PLANILHA .XLSX (Estoque e Vendas / Arquivo Morto)
+// ============================================================================
+router.post("/import/xlsx", importController.importXlsx);
 
 export default router;
